@@ -1,0 +1,26 @@
+# Archivos de entorno
+.env
+secrets.py
+
+# Archivos generados o temporales
+*.pyc
+__pycache__/
+*.log
+*.bak
+*.tmp
+
+# Archivos de exportación generados por tu script
+*.zip
+*.csv
+*.xlsx
+
+# Carpetas generadas por herramientas de empaquetado
+build/
+dist/
+
+# Entorno virtual
+venv/
+
+# Archivos de configuración de IDE o editores
+.vscode/
+.idea/
