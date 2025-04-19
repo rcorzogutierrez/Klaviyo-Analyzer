@@ -3,6 +3,7 @@ from tkinter import messagebox
 from collections import defaultdict
 from datetime import datetime
 from campaign_logic import seleccionar_campanas, query_metric_aggregates_post
+import threading
 
 class Analyzer:
     def __init__(self, campanas, last_results, resultados_tabla, resultados_label, entry, 
@@ -36,27 +37,32 @@ class Analyzer:
             messagebox.showinfo("Información", "Por favor, ingrese códigos de país, palabras clave o números de campaña.")
             return
 
-        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-        self.resultados_tabla.insert("", "end", values=("", "", "Buscando información...", "", ""))
-        
+        # Deshabilitar widgets para evitar interacciones durante el análisis
         self.entry.config(state=tk.DISABLED)
         self.btn_analizar.config(state=tk.DISABLED, bg="#A9A9A9")
         self.btn_exportar.config(state=tk.DISABLED, bg="#A9A9A9")
         self.btn_nuevo_rango.config(state=tk.DISABLED, bg="#A9A9A9")
 
+        # Mostrar mensaje inicial de "Buscando información..."
+        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
+        self.resultados_tabla.insert("", "end", values=("", "", "Buscando información...", "", ""))
+        
         self.resultados_label.config(text=f"Resultados del análisis: {input_str}", font=("TkDefaultFont", 12, "bold"), fg="#23376D")
         self.email_preview.resultados_label = self.resultados_label
 
         self.root.update()
-        
+
+        # Ejecutar el análisis en un hilo separado
+        analysis_thread = threading.Thread(target=self._run_analysis, args=(input_str,))
+        analysis_thread.start()
+
+    def _run_analysis(self, input_str):
+        # Realizar el análisis en un hilo separado
         seleccionados = seleccionar_campanas(self.campanas, input_str)
         if not seleccionados:
-            self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-            self.resultados_tabla.insert("", "end", values=("", "", "No se seleccionaron campañas.", "", ""))
+            self._update_ui_no_campaigns()
         else:
             self.last_results.clear()
-            self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-            
             resultados_por_fecha_pais = defaultdict(lambda: defaultdict(list))
             for camp in seleccionados:
                 idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
@@ -91,6 +97,22 @@ class Analyzer:
                     else:
                         resultados_por_fecha_pais[send_date][campaign_name].append(("No se encontraron clics para esta campaña.", None, total_clicks))
 
+            # Actualizar la interfaz desde el hilo principal
+            self._update_ui_with_results(resultados_por_fecha_pais)
+
+        # Rehabilitar widgets desde el hilo principal
+        self.root.after(0, self._finalize_ui)
+
+    def _update_ui_no_campaigns(self):
+        # Actualizar la interfaz cuando no hay campañas seleccionadas
+        def update():
+            self.resultados_tabla.delete(*self.resultados_tabla.get_children())
+            self.resultados_tabla.insert("", "end", values=("", "", "No se seleccionaron campañas.", "", ""))
+        self.root.after(0, update)
+
+    def _update_ui_with_results(self, resultados_por_fecha_pais):
+        # Actualizar la interfaz con los resultados del análisis
+        def update():
             self.resultados_tabla.delete(*self.resultados_tabla.get_children())
             
             for fecha in sorted(resultados_por_fecha_pais.keys()):
@@ -118,11 +140,13 @@ class Analyzer:
                             self.resultados_tabla.insert("", "end", values=("", "", url, clics_totales, clics_unicos))
                     self.resultados_tabla.insert("", "end", values=("", "", "", "", ""))
             self.resultados_tabla.insert("", "end", values=("", "", "Análisis completado.", "", ""))
+        self.root.after(0, update)
 
+    def _finalize_ui(self):
+        # Rehabilitar widgets y limpiar el campo de entrada
         self.entry.config(state=tk.NORMAL)
         self.btn_analizar.config(state=tk.NORMAL, bg="#23376D")
         self.btn_exportar.config(state=tk.NORMAL, bg="#23376D")
         self.btn_nuevo_rango.config(state=tk.NORMAL, bg="#23376D")
-
         self.entry.delete(0, tk.END)
         self.entry.focus_set()
