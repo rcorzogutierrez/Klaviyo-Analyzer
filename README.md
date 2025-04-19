@@ -4,8 +4,8 @@
 ![License](https://img.shields.io/badge/license-MIT-green) 
 ![Status](https://img.shields.io/badge/status-active-brightgreen) 
 ![Dependabot](https://img.shields.io/badge/dependabot-enabled-brightgreen) 
-![Last Commit](https://img.shields.io/github/last-commit/rcorzgutierrez/Klaviyo-Analyzer) 
-![Repo Size](https://img.shields.io/github/repo-size/rcorzgutierrez/Klaviyo-Analyzer)
+![Last Commit](https://img.shields.io/github/last-commit/rcorzogutierrez/Klaviyo-Analyzer) 
+![Repo Size](https://img.shields.io/github/repo-size/rcorzogutierrez/Klaviyo-Analyzer)
 
 Herramienta para analizar métricas de campañas de marketing enviadas a través de Klaviyo. Permite cargar campañas dentro de un rango de fechas, visualizar métricas clave como Open Rate, Click Rate, Total Value, y exportar reportes en formatos ZIP o CSV.
 
