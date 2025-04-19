@@ -5,18 +5,16 @@ from collections import defaultdict
 from datetime import datetime, date
 import io
 import csv
-import requests
-import webview  # Importar PyWebView
 import ctypes  # Para manejar el escalado de DPI en Windows
 import os  # Para verificar el sistema operativo
 
-# Importar el nuevo componente de selección de fechas
+# Importar el nuevo componente de selección de fechas y previsualización de emails
 from date_selector import DateSelector
+from email_preview import EmailPreview
 
 # Importar tus funciones reales
 from campaign_logic import obtener_campanas, mostrar_campanas_en_tabla, seleccionar_campanas, query_metric_aggregates_post
 from utils import format_number, format_percentage
-from config import HEADERS_KLAVIYO  # Importar los headers desde config.py
 
 # Habilitar el escalado de DPI en Windows
 if os.name == 'nt':  # Solo en Windows
@@ -49,6 +47,19 @@ class ResultadosApp:
         self.original_width = self.screen_width
         self.original_height = self.screen_height
         self.root.state('zoomed')
+
+        # Crear la instancia de EmailPreview
+        self.email_preview = EmailPreview(
+            self.webview_window,
+            None,  # campanas_tabla, se asignará después
+            self.template_ids,
+            self.is_analysis_mode,
+            self.resultados_tabla,
+            self.resultados_label,
+            self.screen_width,
+            self.screen_height,
+            self.root
+        )
 
         # Hacer la ventana principal responsive
         self.root.columnconfigure(0, weight=1)
@@ -197,7 +208,8 @@ class ResultadosApp:
         self.campanas_tabla.column("Preview", width=column_widths["Preview"])
 
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
-        self.campanas_tabla.bind("<Double-1>", self.preview_template)
+        self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
+        self.email_preview.campanas_tabla = self.campanas_tabla  # Asignar después de crear la tabla
 
         # Crear el Treeview para el Total General
         self.grand_total_tabla = ttk.Treeview(self.left_frame, columns=(
@@ -233,6 +245,7 @@ class ResultadosApp:
     def setup_analysis_view(self):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.is_analysis_mode = True
+        self.email_preview.is_analysis_mode = self.is_analysis_mode  # Actualizar en EmailPreview
 
         # Limpiar el frame principal, pero preservar el campo de entrada y los botones
         for widget in self.main_frame.winfo_children():
@@ -334,7 +347,8 @@ class ResultadosApp:
         self.campanas_tabla.column("Preview", width=column_widths["Preview"])
 
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
-        self.campanas_tabla.bind("<Double-1>", self.preview_template)
+        self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
+        self.email_preview.campanas_tabla = self.campanas_tabla  # Actualizar después de crear la tabla
 
         self.grand_total_tabla = ttk.Treeview(self.left_frame, columns=(
             "Numero", "Nombre", "OpenRate", "ClickRate", "Recibios", "OrderUnique", 
@@ -376,6 +390,7 @@ class ResultadosApp:
 
         self.resultados_label = tk.Label(self.results_header_frame, text="Resultados del análisis:", font=("TkDefaultFont", 12, "bold"), fg="#23376D")
         self.resultados_label.pack(side=tk.LEFT, padx=5)
+        self.email_preview.resultados_label = self.resultados_label  # Actualizar en EmailPreview
 
         # Botón para cerrar el panel de análisis
         self.btn_cerrar_analisis = tk.Button(self.results_header_frame, text="Cerrar Análisis", command=self.cerrar_analisis, 
@@ -391,6 +406,7 @@ class ResultadosApp:
 
         self.resultados_tabla = ttk.Treeview(content_frame, columns=("Campaign", "Clics Totales", "URL", "Clics Totales URL", "Clics Únicos"), show="headings")
         self.resultados_tabla.grid(row=0, column=0, sticky="nsew")
+        self.email_preview.resultados_tabla = self.resultados_tabla  # Actualizar en EmailPreview
 
         # Añadir scrollbar vertical para resultados
         resultados_scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=self.resultados_tabla.yview)
@@ -418,118 +434,16 @@ class ResultadosApp:
     def cerrar_analisis(self):
         """Cierra el panel de análisis y restaura la vista de métricas."""
         self.is_analysis_mode = False
+        self.email_preview.is_analysis_mode = self.is_analysis_mode  # Actualizar en EmailPreview
         self.last_results.clear()  # Limpiar los resultados del análisis
-        self.resultados_tabla = None  # Resetear al cerrar el análisis
-        self.resultados_label = None  # Resetear al cerrar el análisis
+        self.resultados_tabla = None
+        self.email_preview.resultados_tabla = None  # Resetear en EmailPreview
+        self.resultados_label = None
+        self.email_preview.resultados_label = None  # Resetear en EmailPreview
         self.setup_metrics_view()
 
         self.root.update()
         self.entry.focus_set()
-
-    def preview_template(self, event):
-        # Cerrar la ventana de previsualización si ya está abierta
-        if self.webview_window:
-            self.webview_window.destroy()
-            self.webview_window = None
-
-        self.root.update()
-        current_state = self.root.state()
-
-        # Obtener el elemento seleccionado en la tabla
-        selected_item = self.campanas_tabla.selection()
-        if not selected_item:
-            if self.is_analysis_mode and self.resultados_tabla:
-                self.resultados_label.config(text="Previsualización del Template: Error")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "No se seleccionó ninguna campaña.", "", ""))
-            return
-
-        # Obtener el item_id de la fila seleccionada
-        item_id = selected_item[0]
-        # Obtener los valores de la fila seleccionada
-        item = self.campanas_tabla.item(item_id)
-        values = item["values"]
-        if not values or len(values) < 13:  # 13 columnas (índices 0-12)
-            if self.is_analysis_mode and self.resultados_tabla:
-                self.resultados_label.config(text="Previsualización del Template: Error")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "Datos de la campaña incompletos.", "", ""))
-            return
-
-        # Obtener el template_id del diccionario interno
-        template_id = self.template_ids.get(item_id)
-        campaign_name = values[1]  # Nombre de la campaña está en el índice 1
-        if not template_id:
-            if self.is_analysis_mode and self.resultados_tabla:
-                self.resultados_label.config(text="Previsualización del Template: No disponible")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "No se encontró un Template ID para esta campaña.", "", ""))
-            return
-
-        # Determinar el país a partir del nombre de la campaña
-        partes = campaign_name.split("_")
-        country = partes[-1].strip().upper() if len(partes) > 1 else "US"
-
-        # Configurar la solicitud a la API de Klaviyo
-        render_url = "https://a.klaviyo.com/api/template-render"
-        headers = HEADERS_KLAVIYO.copy()
-        headers["revision"] = "2023-12-15"
-
-        data = {
-            "data": {
-                "type": "template",
-                "id": template_id,
-                "attributes": {
-                    "context": {
-                        "person": {
-                            "country": country
-                        }
-                    }
-                }
-            }
-        }
-
-        try:
-            response = requests.post(render_url, json=data, headers=headers, timeout=30)
-            response.raise_for_status()  # Lanza una excepción si hay un error HTTP
-            if response.status_code == 200:
-                html_content = response.json().get("data", {}).get("attributes", {}).get("html", "")
-                if html_content:
-                    webview_width = int(self.screen_width * 0.6)
-                    webview_height = int(self.screen_height * 0.6)
-                    self.webview_window = webview.create_window(
-                        f"Previsualización del Template: {campaign_name} (País: {country})",
-                        html=html_content,
-                        width=webview_width,
-                        height=webview_height
-                    )
-                    webview.start(gui='tk')
-                    if self.is_analysis_mode and self.resultados_tabla:
-                        self.resultados_label.config(text=f"Previsualización del Template: {campaign_name} (País: {country})")
-                        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                        self.resultados_tabla.insert("", "end", values=("", "", "Template abierto en una ventana separada.", "", ""))
-                else:
-                    if self.is_analysis_mode and self.resultados_tabla:
-                        self.resultados_label.config(text="Previsualización del Template: Error")
-                        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                        self.resultados_tabla.insert("", "end", values=("", "", "No se pudo obtener el HTML del template.", "", ""))
-            else:
-                if self.is_analysis_mode and self.resultados_tabla:
-                    self.resultados_label.config(text="Previsualización del Template: Error")
-                    self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                    self.resultados_tabla.insert("", "end", values=("", "", f"Error al renderizar el template: {response.status_code} - {response.text}", "", ""))
-        except requests.exceptions.RequestException as e:
-            if self.is_analysis_mode and self.resultados_tabla:
-                self.resultados_label.config(text="Previsualización del Template: Error")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", f"Error al renderizar el template: {str(e)}", "", ""))
-            print(f"Error al renderizar el template: {str(e)}")  # Para depuración
-
-        self.root.update()
-        if current_state == 'zoomed':
-            self.root.state('zoomed')
-        else:
-            self.root.geometry(f"{self.original_width}x{self.original_height}")
 
     def toggle_local_value(self):
         show = self.show_local_value.get()
@@ -624,6 +538,8 @@ class ResultadosApp:
         self.btn_nuevo_rango.config(state=tk.DISABLED, bg="#A9A9A9")
 
         self.resultados_label.config(text=f"Resultados del análisis: {input_str}", font=("TkDefaultFont", 12, "bold"), fg="#23376D")
+        self.email_preview.resultados_label = self.resultados_label  # Actualizar en EmailPreview
+
         self.root.update()
         
         seleccionados = seleccionar_campanas(self.campanas, input_str)
@@ -789,6 +705,7 @@ class ResultadosApp:
         if self.webview_window:
             self.webview_window.destroy()
             self.webview_window = None
+            self.email_preview.webview_window[0] = None  # Actualizar en EmailPreview
 
         for after_id in list(self.root.after_ids):
             self.root.after_cancel(after_id)
