@@ -90,4 +90,4 @@ Herramienta para analizar métricas de campañas de marketing enviadas a través
 5. Crea un Pull Request en GitHub.
 
 ## Licencia
-Este proyecto aún no tiene una licencia definida. Si planeas compartirlo públicamente, considera añadir una (e.g., MIT License).
+Este proyecto está licenciado bajo la [MIT License](LICENSE).
