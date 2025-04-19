@@ -89,6 +89,45 @@ Herramienta para analizar métricas de campañas de marketing enviadas a través
 - El proyecto está diseñado para manejar monedas locales basadas en códigos de países (e.g., USD, HNL, DOP). Configura las monedas soportadas en `config.py`.
 - Los valores monetarios se muestran sin decimales (e.g., "$7,370,048") para mayor claridad.
 
+## Convertir a una Aplicación de Escritorio
+
+Puedes empaquetar esta aplicación en un ejecutable de escritorio para que los usuarios puedan ejecutarla sin instalar Python. Para esto, usaremos **PyInstaller**.
+
+### Pasos para Convertir
+
+1. **Instala PyInstaller**:
+   Asegúrate de estar en el entorno virtual (si lo estás usando) e instala PyInstaller:
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **Empaqueta la Aplicación**:
+   Desde el directorio del proyecto, ejecuta el siguiente comando para crear un ejecutable:
+   ```bash
+   pyinstaller --name KlaviyoAnalyzer --windowed --onefile gui.py
+   ```
+   - `--name KlaviyoAnalyzer`: Nombre del ejecutable.
+   - `--windowed`: Indica que es una aplicación GUI (evita que se abra una consola en Windows).
+   - `--onefile`: Empaqueta todo en un solo archivo ejecutable.
+   - `gui.py`: El archivo principal de la aplicación.
+
+3. **Encuentra el Ejecutable**:
+   - Una vez que PyInstaller termine, el ejecutable estará en el directorio `dist/`.
+   - Por ejemplo, en Windows será `dist/KlaviyoAnalyzer.exe`, y en macOS/Linux será `dist/KlaviyoAnalyzer`.
+
+4. **Ejecuta el Ejecutable**:
+   - Haz doble clic en el ejecutable para abrir la aplicación.
+   - Si estás en Linux o macOS, es posible que necesites darle permisos de ejecución primero:
+     ```bash
+     chmod +x dist/KlaviyoAnalyzer
+     ./dist/KlaviyoAnalyzer
+     ```
+
+### Notas Importantes
+- **Dependencias de Sistema**: En algunos sistemas operativos (como macOS o Linux), `pywebview` puede requerir dependencias adicionales para funcionar correctamente (por ejemplo, `webkit2gtk` en Linux). Consulta la documentación de `pywebview` si encuentras problemas.
+- **Tamaño del Ejecutable**: El ejecutable puede ser grande (~100 MB o más) debido a que incluye Python y todas las bibliotecas necesarias.
+- **Configuración**: Asegúrate de que `config.py` esté presente en el mismo directorio que el ejecutable, ya que la aplicación lo necesita para funcionar.
+
 ## Contribuir
 1. Haz un fork del repositorio.
 2. Crea una nueva rama (`git checkout -b feature/nueva-funcionalidad`).
