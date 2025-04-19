@@ -81,9 +81,42 @@ class ViewManager:
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
         self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
 
+        # Configurar el menú contextual para la columna "Order Count"
+        self.context_menu = tk.Menu(self.campanas_tabla, tearoff=0)
+        self.context_menu.add_command(label="Ver Perfiles que Realizaron Órdenes", command=self.view_order_profiles_placeholder)
+
+        # Binding para el clic derecho en la tabla
+        self.campanas_tabla.bind("<Button-3>", self.show_context_menu)
+
         # Actualizar referencias
         self.email_preview.campanas_tabla = self.campanas_tabla
         self.exporter.campanas_tabla = self.campanas_tabla
+
+    def show_context_menu(self, event):
+        """Muestra el menú contextual si el clic derecho ocurre en la columna 'Order Count'."""
+        # Identificar la fila y columna donde se hizo clic derecho
+        row_id = self.campanas_tabla.identify_row(event.y)
+        column_id = self.campanas_tabla.identify_column(event.x)
+
+        if not row_id or not column_id:
+            return
+
+        # Seleccionar la fila para que sea evidente qué campaña se está interactuando
+        self.campanas_tabla.selection_set(row_id)
+
+        # Verificar si el clic derecho ocurrió en la columna "Order Count"
+        if column_id == "#11":  # "Order Count" es la columna 11 (índice 0 es "Numero", índice 10 es "OrderCount")
+            # Mostrar el menú contextual en la posición del clic
+            self.context_menu.post(event.x_root, event.y_root)
+
+    def view_order_profiles_placeholder(self):
+        """Método temporal para probar el menú contextual."""
+        selected_item = self.campanas_tabla.selection()
+        if selected_item:
+            values = self.campanas_tabla.item(selected_item[0], "values")
+            campaign_name = values[1]  # Nombre de la campaña
+            order_count = values[10]  # Order Count
+            tk.messagebox.showinfo("Información", f"Visualizando perfiles para la campaña: {campaign_name}\nÓrdenes: {order_count}")
 
     def create_grand_total_tabla(self, parent_frame, column_widths):
         """Crea y configura la tabla de total general (grand_total_tabla)."""
