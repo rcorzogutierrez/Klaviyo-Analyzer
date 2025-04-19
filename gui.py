@@ -1,16 +1,14 @@
 import tkinter as tk
-import zipfile
-from tkinter import ttk, scrolledtext, filedialog, messagebox
+from tkinter import ttk, scrolledtext, messagebox
 from collections import defaultdict
 from datetime import datetime, date
-import io
-import csv
 import ctypes  # Para manejar el escalado de DPI en Windows
 import os  # Para verificar el sistema operativo
 
-# Importar el nuevo componente de selección de fechas y previsualización de emails
+# Importar los componentes modulares
 from date_selector import DateSelector
 from email_preview import EmailPreview
+from exporter import Exporter
 
 # Importar tus funciones reales
 from campaign_logic import obtener_campanas, mostrar_campanas_en_tabla, seleccionar_campanas, query_metric_aggregates_post
@@ -61,6 +59,16 @@ class ResultadosApp:
             self.root
         )
 
+        # Crear la instancia de Exporter
+        self.exporter = Exporter(
+            self.campanas,
+            None,  # campanas_tabla, se asignará después
+            self.grouping_var if hasattr(self, 'grouping_var') else tk.StringVar(value="País"),
+            self.last_results,
+            self.is_analysis_mode,
+            self.resultados_tabla
+        )
+
         # Hacer la ventana principal responsive
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -89,7 +97,7 @@ class ResultadosApp:
                                      activeforeground="white", font=("TkDefaultFont", 10, "bold"))
         self.btn_analizar.pack(side=tk.LEFT, padx=5)
         # Habilitar el botón Exportar desde el inicio si hay campañas
-        self.btn_exportar = tk.Button(self.frame_botones, text="Exportar", command=self.exportar, 
+        self.btn_exportar = tk.Button(self.frame_botones, text="Exportar", command=self.exporter.exportar, 
                                      bg="#23376D" if self.campanas else "#A9A9A9", 
                                      fg="white", activebackground="#3A4F9A", 
                                      activeforeground="white", font=("TkDefaultFont", 10, "bold"), 
@@ -210,6 +218,7 @@ class ResultadosApp:
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
         self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
         self.email_preview.campanas_tabla = self.campanas_tabla  # Asignar después de crear la tabla
+        self.exporter.campanas_tabla = self.campanas_tabla  # Asignar después de crear la tabla
 
         # Crear el Treeview para el Total General
         self.grand_total_tabla = ttk.Treeview(self.left_frame, columns=(
@@ -240,12 +249,16 @@ class ResultadosApp:
 
         self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), background="#23376D", foreground="white")
 
+        # Actualizar grouping_var en Exporter después de crearlo
+        self.exporter.grouping_var = self.grouping_var
+
         self.update_grouping(None)
 
     def setup_analysis_view(self):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.is_analysis_mode = True
         self.email_preview.is_analysis_mode = self.is_analysis_mode  # Actualizar en EmailPreview
+        self.exporter.is_analysis_mode = self.is_analysis_mode  # Actualizar en Exporter
 
         # Limpiar el frame principal, pero preservar el campo de entrada y los botones
         for widget in self.main_frame.winfo_children():
@@ -349,6 +362,7 @@ class ResultadosApp:
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
         self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
         self.email_preview.campanas_tabla = self.campanas_tabla  # Actualizar después de crear la tabla
+        self.exporter.campanas_tabla = self.campanas_tabla  # Actualizar después de crear la tabla
 
         self.grand_total_tabla = ttk.Treeview(self.left_frame, columns=(
             "Numero", "Nombre", "OpenRate", "ClickRate", "Recibios", "OrderUnique", 
@@ -407,6 +421,7 @@ class ResultadosApp:
         self.resultados_tabla = ttk.Treeview(content_frame, columns=("Campaign", "Clics Totales", "URL", "Clics Totales URL", "Clics Únicos"), show="headings")
         self.resultados_tabla.grid(row=0, column=0, sticky="nsew")
         self.email_preview.resultados_tabla = self.resultados_tabla  # Actualizar en EmailPreview
+        self.exporter.resultados_tabla = self.resultados_tabla  # Actualizar en Exporter
 
         # Añadir scrollbar vertical para resultados
         resultados_scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=self.resultados_tabla.yview)
@@ -435,9 +450,11 @@ class ResultadosApp:
         """Cierra el panel de análisis y restaura la vista de métricas."""
         self.is_analysis_mode = False
         self.email_preview.is_analysis_mode = self.is_analysis_mode  # Actualizar en EmailPreview
+        self.exporter.is_analysis_mode = self.is_analysis_mode  # Actualizar en Exporter
         self.last_results.clear()  # Limpiar los resultados del análisis
         self.resultados_tabla = None
         self.email_preview.resultados_tabla = None  # Resetear en EmailPreview
+        self.exporter.resultados_tabla = None  # Resetear en Exporter
         self.resultados_label = None
         self.email_preview.resultados_label = None  # Resetear en EmailPreview
         self.setup_metrics_view()
@@ -619,87 +636,6 @@ class ResultadosApp:
 
         self.entry.delete(0, tk.END)
         self.entry.focus_set()
-
-    def exportar(self):
-        default_filename = f"results_{datetime.now().strftime('%Y-%m-%d')}.zip"
-        folder = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("ZIP files", "*.zip")], title="Guardar archivo ZIP", initialfile=default_filename)
-        if not folder:
-            if self.is_analysis_mode and self.resultados_tabla:
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "Exportación cancelada por el usuario.", "", ""))
-            else:
-                messagebox.showinfo("Información", "Exportación cancelada por el usuario.")
-            return
-
-        if self.is_analysis_mode and self.resultados_tabla:
-            self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-
-        try:
-            with zipfile.ZipFile(folder, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Siempre exportar las métricas si hay campañas
-                if self.campanas:
-                    campaigns_filename = f"campaigns_analysis_{datetime.now().strftime('%Y-%m-%d')}_{self.grouping_var.get().lower()}.csv"
-                    csv_content = io.StringIO()
-                    fieldnames = [
-                        "#", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", 
-                        "Unique Orders", "Total Value (USD)", "Total Value (Local)", "Per Recipient", 
-                        "Order Count", "Subject Line", "Preview Text"
-                    ]
-                    writer = csv.DictWriter(csv_content, fieldnames=fieldnames)
-                    writer.writeheader()
-                    for item in self.campanas_tabla.get_children():
-                        values = self.campanas_tabla.item(item, "values")
-                        row = {
-                            "#": values[0] if values[0] else "",
-                            "Nombre": values[1] if values[1] else "",
-                            "Fecha de Envío": values[2] if values[2] else "",
-                            "Open Rate": values[3] if values[3] else "",
-                            "Click Rate": values[4] if values[4] else "",
-                            "Recibidos": values[5] if values[5] else "",
-                            "Unique Orders": values[6] if values[6] else "",
-                            "Total Value (USD)": values[7] if values[7] else "",
-                            "Total Value (Local)": values[8] if values[8] else "",
-                            "Per Recipient": values[9] if values[9] else "",
-                            "Order Count": values[10] if values[10] else "",
-                            "Subject Line": values[11] if values[11] else "",
-                            "Preview Text": values[12] if values[12] else "",
-                        }
-                        writer.writerow(row)
-                    zipf.writestr(campaigns_filename, csv_content.getvalue())
-                    if self.is_analysis_mode and self.resultados_tabla:
-                        self.resultados_tabla.insert("", "end", values=("", "", f"Archivo CSV creado: {campaigns_filename}", "", ""))
-                    else:
-                        messagebox.showinfo("Información", f"Archivo CSV creado: {campaigns_filename}")
-
-                # Exportar los resultados del análisis si existen
-                if self.last_results:
-                    for (campaign_name, send_date), totales in self.last_results.items():
-                        filename = f"{campaign_name.replace(' ', '_')}_{send_date}_results.csv"
-                        csv_content = io.StringIO()
-                        fieldnames = ['URL', 'Clics Totales', 'Clics Únicos']
-                        writer = csv.DictWriter(csv_content, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for url, data in totales.items():
-                            writer.writerow({'URL': url, 'Clics Totales': data['count'], 'Clics Únicos': data['unique']})
-                        zipf.writestr(filename, csv_content.getvalue())
-                        if self.is_analysis_mode and self.resultados_tabla:
-                            self.resultados_tabla.insert("", "end", values=("", "", f"Archivo CSV creado: {filename}", "", ""))
-                        else:
-                            messagebox.showinfo("Información", f"Archivo CSV creado: {filename}")
-
-                # Mensaje de éxito
-                message = f"Exportación exitosa. Resultados comprimidos en: {folder}"
-                if self.is_analysis_mode and self.resultados_tabla:
-                    self.resultados_tabla.insert("", "end", values=("", "", message, "", ""))
-                else:
-                    messagebox.showinfo("Información", message)
-
-        except Exception as e:
-            message = f"Error al exportar: {e}"
-            if self.is_analysis_mode and self.resultados_tabla:
-                self.resultados_tabla.insert("", "end", values=("", "", message, "", ""))
-            else:
-                messagebox.showerror("Error", message)
 
     def nuevo_rango(self):
         if self.webview_window:
