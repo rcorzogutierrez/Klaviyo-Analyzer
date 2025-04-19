@@ -1,6 +1,5 @@
 import tkinter as tk
 import zipfile
-from tkcalendar import Calendar
 from tkinter import ttk, scrolledtext, filedialog, messagebox
 from collections import defaultdict
 from datetime import datetime, date
@@ -10,6 +9,9 @@ import requests
 import webview  # Importar PyWebView
 import ctypes  # Para manejar el escalado de DPI en Windows
 import os  # Para verificar el sistema operativo
+
+# Importar el nuevo componente de selección de fechas
+from date_selector import DateSelector
 
 # Importar tus funciones reales
 from campaign_logic import obtener_campanas, mostrar_campanas_en_tabla, seleccionar_campanas, query_metric_aggregates_post
@@ -22,65 +24,6 @@ if os.name == 'nt':  # Solo en Windows
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # Hacer que la aplicación sea consciente del DPI
     except Exception as e:
         print(f"No se pudo establecer la conciencia de DPI: {e}")
-
-def seleccionar_rango_fechas(callback):
-    def obtener_fechas():
-        start_date = cal_start.get_date()
-        end_date = cal_end.get_date()
-        root.result = (start_date, end_date)
-        for after_id in list(root.after_ids):
-            root.after_cancel(after_id)
-        root.quit()
-        root.destroy()
-        callback(start_date, end_date)
-
-    root = tk.Tk()
-    root.title("Seleccionar Rango de Fechas")
-
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-
-    window_width = max(int(screen_width * 0.5), 800)
-    window_height = max(int(screen_height * 0.4), 400)
-
-    x = (screen_width // 2) - (window_width // 2)
-    y = (screen_height // 2) - (window_height // 2)
-    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-    root.after_ids = []
-
-    today = date.today()
-    current_year = today.year
-    current_month = today.month
-    current_day = today.day
-
-    frame = tk.Frame(root)
-    frame.place(relx=0.5, rely=0.5, anchor="center")
-
-    frame_start = tk.Frame(frame)
-    frame_start.pack(side=tk.LEFT, padx=30)
-    tk.Label(frame_start, text="Fecha Inicial:", fg="#23376D", font=("TkDefaultFont", 10, "bold")).pack()
-    cal_start = Calendar(frame_start, selectmode="day", year=current_year, month=current_month, day=current_day, 
-                         date_pattern="yyyy-mm-dd", firstweekday="sunday", showweeknumbers=False)
-    cal_start.pack()
-
-    frame_end = tk.Frame(frame)
-    frame_end.pack(side=tk.LEFT, padx=30)
-    tk.Label(frame_end, text="Fecha Final:", fg="#23376D", font=("TkDefaultFont", 10, "bold")).pack()
-    cal_end = Calendar(frame_end, selectmode="day", year=current_year, month=current_month, day=current_day, 
-                       date_pattern="yyyy-mm-dd", firstweekday="sunday", showweeknumbers=False)
-    cal_end.pack()
-
-    tk.Button(root, text="Confirmar", command=obtener_fechas, bg="#23376D", fg="white", 
-              activebackground="#3A4F9A", activeforeground="white", font=("TkDefaultFont", 10, "bold")).place(relx=0.5, rely=0.9, anchor="center")
-    root.protocol("WM_DELETE_WINDOW", lambda: [root.quit(), root.destroy()])
-
-    root.result = None
-    root.mainloop()
-
-    if root.result is None:
-        return None
-    return root.result
 
 class ResultadosApp:
     def __init__(self, root, campanas, list_start_date, list_end_date):
@@ -891,7 +834,8 @@ def abrir_resultados(list_start_date, list_end_date):
     root.mainloop()
 
 def main():
-    fechas = seleccionar_rango_fechas(abrir_resultados)
+    selector = DateSelector(abrir_resultados)
+    fechas = selector.get_result()
     if not fechas:
         print("No se seleccionó ninguna fecha.")
 
