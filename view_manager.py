@@ -81,11 +81,7 @@ class ViewManager:
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
         self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
 
-        # Configurar el menú contextual para la columna "Order Count"
-        self.context_menu = tk.Menu(self.campanas_tabla, tearoff=0)
-        self.context_menu.add_command(label="Ver Perfiles que Realizaron Órdenes", command=self.view_order_profiles_placeholder)
-
-        # Binding para el clic derecho en la tabla
+        # Configurar el binding para el clic derecho en la tabla
         self.campanas_tabla.bind("<Button-3>", self.show_context_menu)
 
         # Actualizar referencias
@@ -94,29 +90,65 @@ class ViewManager:
 
     def show_context_menu(self, event):
         """Muestra el menú contextual si el clic derecho ocurre en la columna 'Order Count'."""
-        # Identificar la fila y columna donde se hizo clic derecho
-        row_id = self.campanas_tabla.identify_row(event.y)
-        column_id = self.campanas_tabla.identify_column(event.x)
+        try:
+            # Identificar la fila y columna donde se hizo clic derecho
+            row_id = self.campanas_tabla.identify_row(event.y)
+            column_id = self.campanas_tabla.identify_column(event.x)
 
-        if not row_id or not column_id:
-            return
+            if not row_id or not column_id:
+                return
 
-        # Seleccionar la fila para que sea evidente qué campaña se está interactuando
-        self.campanas_tabla.selection_set(row_id)
+            # Seleccionar la fila para que sea evidente qué campaña se está interactuando
+            self.campanas_tabla.selection_set(row_id)
 
-        # Verificar si el clic derecho ocurrió en la columna "Order Count"
-        if column_id == "#11":  # "Order Count" es la columna 11 (índice 0 es "Numero", índice 10 es "OrderCount")
+            # Verificar si el clic derecho ocurrió en la columna "Order Count"
+            if column_id != "#11":  # "Order Count" es la columna 11
+                return
+
+            # Obtener los datos de la fila seleccionada
+            selected_item = self.campanas_tabla.selection()
+            if not selected_item:
+                return
+
+            values = self.campanas_tabla.item(selected_item[0], "values")
+            campaign_name = values[1]  # Nombre de la campaña
+
+            # Intentar obtener el campaign_id (puede estar en los tags o datos asociados)
+            campaign_id = None
+            # Los tags suelen usarse para almacenar identificadores como campaign_id
+            tags = self.campanas_tabla.item(selected_item[0], "tags")
+            if tags and len(tags) > 0:
+                # Suponemos que el campaign_id podría estar en los tags
+                # Esto depende de cómo campaign_logic.py llena la tabla
+                campaign_id = tags[0] if tags[0].startswith("campaign_") else None
+                if campaign_id:
+                    campaign_id = campaign_id.replace("campaign_", "")
+
+            if not campaign_id:
+                # Si no está en los tags, mostramos un valor placeholder
+                campaign_id = "No disponible"
+
+            # Crear el menú contextual dinámicamente
+            self.context_menu = tk.Menu(self.campanas_tabla, tearoff=0)
+            self.context_menu.add_command(label=f"Campaña: {campaign_name}", state="disabled")
+            self.context_menu.add_command(label=f"Campaign ID: {campaign_id}", state="disabled")
+            self.context_menu.add_separator()
+            self.context_menu.add_command(label="Ver Perfiles que Realizaron Órdenes", 
+                                        command=lambda: self.view_order_profiles_placeholder(campaign_name, campaign_id))
+
             # Mostrar el menú contextual en la posición del clic
             self.context_menu.post(event.x_root, event.y_root)
 
-    def view_order_profiles_placeholder(self):
+        except Exception as e:
+            print(f"Error al mostrar el menú contextual: {str(e)}")
+
+    def view_order_profiles_placeholder(self, campaign_name, campaign_id):
         """Método temporal para probar el menú contextual."""
-        selected_item = self.campanas_tabla.selection()
-        if selected_item:
-            values = self.campanas_tabla.item(selected_item[0], "values")
-            campaign_name = values[1]  # Nombre de la campaña
-            order_count = values[10]  # Order Count
-            tk.messagebox.showinfo("Información", f"Visualizando perfiles para la campaña: {campaign_name}\nÓrdenes: {order_count}")
+        try:
+            print(f"Visualizando perfiles para la campaña: {campaign_name} (ID: {campaign_id})")
+            tk.messagebox.showinfo("Información", f"Visualizando perfiles para la campaña: {campaign_name}\nCampaign ID: {campaign_id}")
+        except Exception as e:
+            print(f"Error al visualizar perfiles: {str(e)}")
 
     def create_grand_total_tabla(self, parent_frame, column_widths):
         """Crea y configura la tabla de total general (grand_total_tabla)."""
@@ -172,7 +204,7 @@ class ViewManager:
 
         tk.Checkbutton(control_frame, text="Mostrar Total Value (Local)", variable=show_local_value,
                        command=update_grouping_callback, fg="#23376D").pack(side=tk.LEFT, padx=5)
-
+       
         tk.Label(self.left_frame, text="Campañas en el rango seleccionado:", fg="#23376D", font=("TkDefaultFont", 12, "bold")).grid(row=1, column=0, sticky="ew", pady=5)
 
         # Frame para el Treeview con scrollbar

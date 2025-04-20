@@ -226,7 +226,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
     tree.column("Preview", width=150)
 
     def add_campaign_row(camp, show_local_value=True):
-        idx, _, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
         partes = name.split("_")
         country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
         currency = COUNTRY_TO_CURRENCY.get(country_code, "USD")
@@ -325,11 +325,11 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             tree.insert("", "end", values=(f"{pais.upper()}", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
             for camp in sorted(grupos[pais], key=lambda x: x[0]):
                 values = add_campaign_row(camp, show_local_value)
-                # Insertar la fila y obtener el item_id
-                item_id = tree.insert("", "end", values=values)
+                # Insertar la fila y asignar el campaign_id como tag
+                idx, campaign_id, _, _, _, _, _, _, _, template_id, _, _, _, _, _ = camp
+                item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
                 # Almacenar el template_id en el diccionario
                 if template_ids_dict is not None:
-                    _, _, _, _, _, _, _, _, _, template_id, _, _, _, _, _ = camp
                     if template_id is not None:
                         template_ids_dict[item_id] = template_id
             
@@ -344,11 +344,11 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             tree.insert("", "end", values=(fecha, "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
             for camp in sorted(grupos[fecha], key=lambda x: x[0]):
                 values = add_campaign_row(camp, show_local_value=False)
-                # Insertar la fila y obtener el item_id
-                item_id = tree.insert("", "end", values=values)
+                # Insertar la fila y asignar el campaign_id como tag
+                idx, campaign_id, _, _, _, _, _, _, _, template_id, _, _, _, _, _ = camp
+                item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
                 # Almacenar el template_id en el diccionario
                 if template_ids_dict is not None:
-                    _, _, _, _, _, _, _, _, _, template_id, _, _, _, _, _ = camp
                     if template_id is not None:
                         template_ids_dict[item_id] = template_id
             
