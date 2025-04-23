@@ -258,6 +258,28 @@ class ViewManager:
             dynamic_col = "SKU" if filter_type == "Producto" else "ID Categoria"
             self.resultados_tabla.column(dynamic_col, width=int(total_resultados_width * 0.15), anchor="center")
 
+    def on_resultados_double_click(self, event):
+        """Maneja el evento de doble clic en resultados_tabla para abrir el visualizador con la URL seleccionada."""
+        try:
+            # Identificar la fila seleccionada
+            selected_item = self.resultados_tabla.selection()
+            if not selected_item:
+                return
+
+            # Obtener los valores de la fila
+            values = self.resultados_tabla.item(selected_item[0], "values")
+            url = values[2]  # La URL está en la tercera columna (índice 2)
+
+            # Verificar si la fila contiene una URL válida (no una fila de fecha, campaña o mensaje)
+            if not url or url.startswith("Fecha de envío:") or url.startswith("No se encontraron") or url == "Análisis completado.":
+                return
+
+            # Llamar al método del visualizador para mostrar la URL
+            self.email_preview.preview_url(url)
+
+        except Exception as e:
+            print(f"Error al abrir el visualizador: {str(e)}")
+
     def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.email_preview.is_analysis_mode = True
@@ -355,5 +377,8 @@ class ViewManager:
 
         # Configurar encabezados y anchos iniciales
         self.update_resultados_tabla_columns()
+
+        # Añadir binding para el evento de doble clic
+        self.resultados_tabla.bind("<Double-1>", self.on_resultados_double_click)
 
         self.resultados_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
