@@ -8,7 +8,7 @@ import threading
 class Analyzer:
     def __init__(self, campanas, last_results, resultados_tabla, resultados_label, entry, 
                  btn_analizar, btn_exportar, btn_nuevo_rango, root, email_preview, 
-                 is_analysis_mode, setup_analysis_view_callback):
+                 is_analysis_mode, setup_analysis_view_callback, filter_var):
         self.campanas = campanas
         self.last_results = last_results
         self.resultados_tabla = resultados_tabla
@@ -21,6 +21,8 @@ class Analyzer:
         self.email_preview = email_preview
         self.is_analysis_mode = is_analysis_mode
         self.setup_analysis_view_callback = setup_analysis_view_callback
+        self.filter_var = filter_var  # Variable para rastrear la selección del filtro
+        self.all_click_data = {}  # Almacenar todos los datos de clics para filtrar
 
     def analizar(self):
         # Verificar si estamos en modo análisis; si no, cambiar a la vista de análisis
@@ -63,6 +65,7 @@ class Analyzer:
             self._update_ui_no_campaigns()
         else:
             self.last_results.clear()
+            self.all_click_data.clear()
             resultados_por_fecha_pais = defaultdict(lambda: defaultdict(list))
             for camp in seleccionados:
                 idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
@@ -94,6 +97,10 @@ class Analyzer:
                     if totales:
                         self.last_results[(campaign_name, send_date)] = totales
                         resultados_por_fecha_pais[send_date][campaign_name].append((None, totales, total_clicks))
+                        # Almacenar datos para el filtro
+                        if send_date not in self.all_click_data:
+                            self.all_click_data[send_date] = {}
+                        self.all_click_data[send_date][campaign_name] = (total_clicks, totales)
                     else:
                         resultados_por_fecha_pais[send_date][campaign_name].append(("No se encontraron clics para esta campaña.", None, total_clicks))
 
@@ -111,36 +118,111 @@ class Analyzer:
         self.root.after(0, update)
 
     def _update_ui_with_results(self, resultados_por_fecha_pais):
-        # Actualizar la interfaz con los resultados del análisis
+        # Actualizar la interfaz con los resultados del análisis aplicando el filtro
         def update():
-            self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-            
-            for fecha in sorted(resultados_por_fecha_pais.keys()):
-                self.resultados_tabla.insert("", "end", values=("", "", f"Fecha de envío: {fecha}", "", ""), tags=("bold",))
-                campañas_ordenadas = {}
-                for campaign_name, resultados in resultados_por_fecha_pais[fecha].items():
-                    total_clics = 0
-                    for _, totales, total_clicks_campaign in resultados:
-                        if totales:
-                            total_clics += sum(data["count"] for data in totales.values())
-                    campañas_ordenadas[campaign_name] = total_clics
-                
-                for campaign_name in sorted(campañas_ordenadas, key=lambda x: campañas_ordenadas[x], reverse=True):
-                    resultados = resultados_por_fecha_pais[fecha][campaign_name]
-                    for error, totales, total_clicks in resultados:
-                        self.resultados_tabla.insert("", "end", values=(campaign_name, total_clicks, "", "", ""))
-                        todas_las_urls = []
-                        if error:
-                            self.resultados_tabla.insert("", "end", values=("", "", error, "", ""))
-                        else:
-                            for url, data in totales.items():
-                                todas_las_urls.append((url, data["count"], data["unique"]))
-                        todas_las_urls.sort(key=lambda x: x[1], reverse=True)
-                        for url, clics_totales, clics_unicos in todas_las_urls:
-                            self.resultados_tabla.insert("", "end", values=("", "", url, clics_totales, clics_unicos))
-                    self.resultados_tabla.insert("", "end", values=("", "", "", "", ""))
-            self.resultados_tabla.insert("", "end", values=("", "", "Análisis completado.", "", ""))
+            self.apply_filter()
         self.root.after(0, update)
+
+    def extract_sku_or_category_id(self, url, filter_type):
+        """
+        Extrae el SKU o ID Categoría de la URL según el filtro seleccionado, deteniéndose antes del '?' y preservando mayúsculas.
+
+        Args:
+            url (str): La URL de la que extraer el valor.
+            filter_type (str): El tipo de filtro ("Producto" o "Categoría").
+
+        Returns:
+            str: El SKU o ID Categoría extraído, o "" si no se encuentra.
+        """
+        # Usar una versión en minúsculas para las comparaciones, pero la original para extraer el valor
+        url_lower = url.lower()
+        url_original = url  # Mantener la URL original para preservar mayúsculas
+
+        # Dividir la URL antes del '?' para ignorar parámetros de consulta
+        url_lower = url_lower.split("?")[0]
+        url_original = url_original.split("?")[0]
+
+        if filter_type == "Producto":
+            # Buscar /producto/descripcion-del-producto/SKU
+            if "/producto/" in url_lower:
+                parts = url_lower.split("/producto/")[1].split("/")
+                if len(parts) >= 2:  # Asegurarse de que hay al menos descripción y SKU
+                    # Usar la URL original para extraer el SKU con mayúsculas preservadas
+                    original_parts = url_original.split("/producto/")[1].split("/")
+                    return original_parts[-1]  # El último elemento es el SKU
+            elif "/product/" in url_lower:
+                parts = url_lower.split("/product/")[1].split("/")
+                if len(parts) >= 2:
+                    original_parts = url_original.split("/product/")[1].split("/")
+                    return original_parts[-1]
+        elif filter_type == "Categoría":
+            # Buscar /categoria/descripcion-del-producto/ID Categoria
+            if "/categoria/" in url_lower:
+                parts = url_lower.split("/categoria/")[1].split("/")
+                if len(parts) >= 2:
+                    original_parts = url_original.split("/categoria/")[1].split("/")
+                    return original_parts[-1]  # El último elemento es el ID Categoría
+            elif "/category/" in url_lower:
+                parts = url_lower.split("/category/")[1].split("/")
+                if len(parts) >= 2:
+                    original_parts = url_original.split("/category/")[1].split("/")
+                    return original_parts[-1]
+        return ""
+
+    def apply_filter(self, event=None):
+        """Filtra los datos de clics según la selección del filtro y actualiza la tabla de resultados."""
+        if not self.resultados_tabla:
+            return
+
+        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
+        filter_type = self.filter_var.get()
+
+        filtered_urls_count = 0
+
+        for fecha in sorted(self.all_click_data.keys()):
+            self.resultados_tabla.insert("", "end", values=("", "", f"Fecha de envío: {fecha}", "", ""), tags=("bold",))
+            campañas_ordenadas = {}
+            for campaign_name, (total_clicks, totales) in self.all_click_data[fecha].items():
+                campañas_ordenadas[campaign_name] = total_clicks
+
+            for campaign_name in sorted(campañas_ordenadas, key=lambda x: campañas_ordenadas[x], reverse=True):
+                total_clicks, totales = self.all_click_data[fecha][campaign_name]
+                todas_las_urls = []
+                for url, data in totales.items():
+                    url_lower = url.lower()
+                    # Aplicar el filtro
+                    if filter_type == "Todos":
+                        todas_las_urls.append((url, data["count"], data["unique"]))
+                    elif filter_type == "Producto":
+                        if "/producto/" in url_lower or "/product/" in url_lower:
+                            todas_las_urls.append((url, data["count"], data["unique"]))
+                    elif filter_type == "Categoría":
+                        if "/categoria/" in url_lower or "/category/" in url_lower:
+                            todas_las_urls.append((url, data["count"], data["unique"]))
+
+                # Mostrar la campaña incluso si no tiene URLs que cumplan con el filtro
+                self.resultados_tabla.insert("", "end", values=(campaign_name, total_clicks, "", "", ""))
+                if todas_las_urls:
+                    todas_las_urls.sort(key=lambda x: x[1], reverse=True)
+                    for url, clics_totales, clics_unicos in todas_las_urls:
+                        # Extraer SKU o ID Categoría si aplica
+                        extra_value = self.extract_sku_or_category_id(url, filter_type) if filter_type in ["Producto", "Categoría"] else ""
+                        if filter_type in ["Producto", "Categoría"]:
+                            self.resultados_tabla.insert("", "end", values=("", "", url, clics_totales, clics_unicos, extra_value))
+                        else:
+                            self.resultados_tabla.insert("", "end", values=("", "", url, clics_totales, clics_unicos))
+                        filtered_urls_count += 1
+                else:
+                    # Mostrar un mensaje si no hay URLs que cumplan con el filtro
+                    if filter_type == "Producto":
+                        self.resultados_tabla.insert("", "end", values=("", "", "No se encontraron productos en esta campaña.", "", ""))
+                    elif filter_type == "Categoría":
+                        self.resultados_tabla.insert("", "end", values=("", "", "No se encontraron categorías en esta campaña.", "", ""))
+                
+                self.resultados_tabla.insert("", "end", values=("", "", "", "", ""))
+
+        self.resultados_tabla.insert("", "end", values=("", "", "Análisis completado.", "", ""))
+        self.resultados_label.config(text=f"Resultados del análisis: {filtered_urls_count} enlaces analizados")
 
     def _finalize_ui(self):
         # Rehabilitar widgets y limpiar el campo de entrada

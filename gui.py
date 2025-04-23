@@ -129,7 +129,8 @@ class ResultadosApp:
             self.root,
             self.email_preview,
             self.is_analysis_mode,
-            self.setup_analysis_view  # Pasar el método como callback
+            self.setup_analysis_view,
+            self.view_manager.filter_var  # Pasar filter_var para el filtrado
         )
 
         # Configurar el comando del botón Analizar y el binding del Entry
@@ -171,7 +172,8 @@ class ResultadosApp:
             self.grouping_var,
             self.show_local_value,
             self.update_grouping,
-            self.cerrar_analisis
+            self.cerrar_analisis,
+            self.analyzer.apply_filter  # Pasar el método apply_filter como filter_callback
         )
         self.campanas_tabla = self.view_manager.campanas_tabla
         self.grand_total_tabla = self.view_manager.grand_total_tabla

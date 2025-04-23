@@ -12,6 +12,8 @@ class ViewManager:
         self.grand_total_tabla = None
         self.column_widths = None
         self.left_frame = None
+        self.filter_var = tk.StringVar(value="Todos")  # Variable para el filtro, por defecto "Todos"
+        self.resultados_tabla = None  # Para acceder a resultados_tabla
 
     def create_campanas_tabla(self, treeview_frame, total_table_width):
         """Crea y configura la tabla de campañas (campanas_tabla)."""
@@ -115,17 +117,13 @@ class ViewManager:
 
             # Intentar obtener el campaign_id (puede estar en los tags o datos asociados)
             campaign_id = None
-            # Los tags suelen usarse para almacenar identificadores como campaign_id
             tags = self.campanas_tabla.item(selected_item[0], "tags")
             if tags and len(tags) > 0:
-                # Suponemos que el campaign_id podría estar en los tags
-                # Esto depende de cómo campaign_logic.py llena la tabla
                 campaign_id = tags[0] if tags[0].startswith("campaign_") else None
                 if campaign_id:
                     campaign_id = campaign_id.replace("campaign_", "")
 
             if not campaign_id:
-                # Si no está en los tags, mostramos un valor placeholder
                 campaign_id = "No disponible"
 
             # Crear el menú contextual dinámicamente
@@ -223,7 +221,44 @@ class ViewManager:
         # Actualizar grouping_var en Exporter
         self.exporter.grouping_var = grouping_var
 
-    def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback):
+    def update_resultados_tabla_columns(self):
+        """Actualiza las columnas de resultados_tabla según el filtro seleccionado."""
+        filter_type = self.filter_var.get()
+        
+        # Definir las columnas base
+        columns = ("Campaign", "Clics Totales", "URL", "Clics Totales URL", "Clics Únicos")
+        headings = {"Campaign": "Campaña", "Clics Totales": "Clics Totales", "URL": "URL", 
+                   "Clics Totales URL": "Clics Totales URL", "Clics Únicos": "Clics Únicos"}
+
+        # Añadir columna dinámica según el filtro
+        if filter_type == "Producto":
+            columns = ("Campaign", "Clics Totales", "URL", "Clics Totales URL", "Clics Únicos", "SKU")
+            headings["SKU"] = "SKU"
+        elif filter_type == "Categoría":
+            columns = ("Campaign", "Clics Totales", "URL", "Clics Totales URL", "Clics Únicos", "ID Categoria")
+            headings["ID Categoria"] = "ID Categoría"
+
+        # Actualizar las columnas de la tabla
+        self.resultados_tabla.configure(columns=columns)
+        
+        # Configurar los encabezados
+        for col in columns:
+            self.resultados_tabla.heading(col, text=headings.get(col, col))
+
+        # Configurar anchos de columnas
+        total_resultados_width = int(self.screen_width * 0.5)
+        self.resultados_tabla.column("Campaign", width=int(total_resultados_width * 0.10), anchor="w")  # Reducido de 0.15 a 0.10
+        self.resultados_tabla.column("Clics Totales", width=int(total_resultados_width * 0.10), anchor="center")  # Reducido de 0.15 a 0.10
+        self.resultados_tabla.column("URL", width=int(total_resultados_width * 0.35), anchor="w")  # Reducido de 0.40 a 0.35
+        self.resultados_tabla.column("Clics Totales URL", width=int(total_resultados_width * 0.15), anchor="center")
+        self.resultados_tabla.column("Clics Únicos", width=int(total_resultados_width * 0.15), anchor="center")
+        
+        # Configurar la columna dinámica (si existe)
+        if filter_type in ["Producto", "Categoría"]:
+            dynamic_col = "SKU" if filter_type == "Producto" else "ID Categoria"
+            self.resultados_tabla.column(dynamic_col, width=int(total_resultados_width * 0.15), anchor="center")
+
+    def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.email_preview.is_analysis_mode = True
         self.exporter.is_analysis_mode = True
@@ -276,13 +311,24 @@ class ViewManager:
         self.right_frame.columnconfigure(0, weight=1)
         self.right_frame.rowconfigure(1, weight=1)
 
-        # Frame para el título y el botón de cerrar
+        # Frame para el título, el filtro y el botón de cerrar
         self.results_header_frame = tk.Frame(self.right_frame)
         self.results_header_frame.grid(row=0, column=0, sticky="ew", pady=5)
 
         self.resultados_label = tk.Label(self.results_header_frame, text="Resultados del análisis:", font=("TkDefaultFont", 12, "bold"), fg="#23376D")
         self.resultados_label.pack(side=tk.LEFT, padx=5)
         self.email_preview.resultados_label = self.resultados_label
+
+        # Añadir el Combobox para el filtro
+        tk.Label(self.results_header_frame, text="Filtrar por:", fg="#23376D", font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        filter_options = ttk.Combobox(self.results_header_frame, textvariable=self.filter_var, values=["Todos", "Producto", "Categoría"], state="readonly")
+        filter_options.pack(side=tk.LEFT, padx=5)
+        if filter_callback:
+            # Actualizar las columnas cuando cambie el filtro
+            def combined_callback(event):
+                self.update_resultados_tabla_columns()
+                filter_callback()
+            filter_options.bind("<<ComboboxSelected>>", combined_callback)
 
         # Botón para cerrar el panel de análisis
         self.btn_cerrar_analisis = tk.Button(self.results_header_frame, text="Cerrar Análisis", command=cerrar_analisis_callback,
@@ -296,6 +342,7 @@ class ViewManager:
         content_frame.columnconfigure(0, weight=1)
         content_frame.rowconfigure(0, weight=1)
 
+        # Crear la tabla con columnas base (se actualizarán dinámicamente)
         self.resultados_tabla = ttk.Treeview(content_frame, columns=("Campaign", "Clics Totales", "URL", "Clics Totales URL", "Clics Únicos"), show="headings")
         self.resultados_tabla.grid(row=0, column=0, sticky="nsew")
         self.email_preview.resultados_tabla = self.resultados_tabla
@@ -306,17 +353,7 @@ class ViewManager:
         resultados_scrollbar.grid(row=0, column=1, sticky="ns")
         self.resultados_tabla.configure(yscrollcommand=resultados_scrollbar.set)
 
-        self.resultados_tabla.heading("Campaign", text="Campaña")
-        self.resultados_tabla.heading("Clics Totales", text="Clics Totales")
-        self.resultados_tabla.heading("URL", text="URL")
-        self.resultados_tabla.heading("Clics Totales URL", text="Clics Totales URL")
-        self.resultados_tabla.heading("Clics Únicos", text="Clics Únicos")
-
-        total_resultados_width = int(self.screen_width * 0.5)
-        self.resultados_tabla.column("Campaign", width=int(total_resultados_width * 0.15), anchor="w")
-        self.resultados_tabla.column("Clics Totales", width=int(total_resultados_width * 0.15), anchor="center")
-        self.resultados_tabla.column("URL", width=int(total_resultados_width * 0.40), anchor="w")
-        self.resultados_tabla.column("Clics Totales URL", width=int(total_resultados_width * 0.15), anchor="center")
-        self.resultados_tabla.column("Clics Únicos", width=int(total_resultados_width * 0.15), anchor="center")
+        # Configurar encabezados y anchos iniciales
+        self.update_resultados_tabla_columns()
 
         self.resultados_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
