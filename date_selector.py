@@ -6,7 +6,7 @@ class DateSelector:
     def __init__(self, callback):
         self.callback = callback
         self.root = tk.Tk()
-        self.root.title("Seleccionar Rango de Fechas")
+        self.root.title("Seleccionar Rango de Fechas - Klaviyo Metrics All-in-One v6")
         self.setup_ui()
         self.root.result = None
         self.root.mainloop()
@@ -21,6 +21,16 @@ class DateSelector:
         y = (screen_height // 2) - (window_height // 2)
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         self.root.after_ids = []
+
+        # Añadir el nombre de la aplicación
+        app_name_label = tk.Label(
+            self.root,
+            text="Klaviyo Metrics All-in-One",
+            font=("Fira Sans", 16, "bold"),
+            fg="#23376D",
+            pady=10
+        )
+        app_name_label.place(relx=0.5, rely=0.1, anchor="center")
 
         # Configurar fechas por defecto
         today = date.today()
