@@ -29,8 +29,6 @@ class EmailPreview:
         if not selected_item:
             if self.is_analysis_mode and self.resultados_tabla:
                 self.resultados_label.config(text="Previsualización del Template: Error")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "No se seleccionó ninguna campaña.", "", ""))
             return
 
         # Obtener el item_id de la fila seleccionada
@@ -41,8 +39,6 @@ class EmailPreview:
         if not values or len(values) < 13:  # 13 columnas (índices 0-12)
             if self.is_analysis_mode and self.resultados_tabla:
                 self.resultados_label.config(text="Previsualización del Template: Error")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "Datos de la campaña incompletos.", "", ""))
             return
 
         # Obtener el template_id del diccionario interno
@@ -51,8 +47,6 @@ class EmailPreview:
         if not template_id:
             if self.is_analysis_mode and self.resultados_tabla:
                 self.resultados_label.config(text="Previsualización del Template: No disponible")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", "No se encontró un Template ID para esta campaña.", "", ""))
             return
 
         # Determinar el país a partir del nombre de la campaña
@@ -93,25 +87,17 @@ class EmailPreview:
                         height=webview_height
                     )
                     webview.start(gui='tk')
-                    if self.is_analysis_mode and self.resultados_tabla:
+                    if self.is_analysis_mode and self.resultados_label:
                         self.resultados_label.config(text=f"Previsualización del Template: {campaign_name} (País: {country})")
-                        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                        self.resultados_tabla.insert("", "end", values=("", "", "Template abierto en una ventana separada.", "", ""))
                 else:
-                    if self.is_analysis_mode and self.resultados_tabla:
+                    if self.is_analysis_mode and self.resultados_label:
                         self.resultados_label.config(text="Previsualización del Template: Error")
-                        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                        self.resultados_tabla.insert("", "end", values=("", "", "No se pudo obtener el HTML del template.", "", ""))
             else:
-                if self.is_analysis_mode and self.resultados_tabla:
+                if self.is_analysis_mode and self.resultados_label:
                     self.resultados_label.config(text="Previsualización del Template: Error")
-                    self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                    self.resultados_tabla.insert("", "end", values=("", "", f"Error al renderizar el template: {response.status_code} - {response.text}", "", ""))
         except requests.exceptions.RequestException as e:
-            if self.is_analysis_mode and self.resultados_tabla:
+            if self.is_analysis_mode and self.resultados_label:
                 self.resultados_label.config(text="Previsualización del Template: Error")
-                self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-                self.resultados_tabla.insert("", "end", values=("", "", f"Error al renderizar el template: {str(e)}", "", ""))
             print(f"Error al renderizar el template: {str(e)}")  # Para depuración
 
         self.root.update()
@@ -137,6 +123,10 @@ class EmailPreview:
                 self.resultados_tabla.insert("", "end", values=("", "", "No se proporcionó una URL válida.", "", ""))
             return
 
+        # Copiar la URL al portapapeles
+        self.root.clipboard_clear()
+        self.root.clipboard_append(url)
+
         # Guardar el contenido actual de resultados_tabla
         self.original_table_content = []
         for item in self.resultados_tabla.get_children():
@@ -146,7 +136,7 @@ class EmailPreview:
 
         # Mostrar mensaje temporal sin limpiar la tabla completamente
         if self.is_analysis_mode and self.resultados_tabla:
-            self.resultados_label.config(text=f"Previsualización de la URL: {url}")
+            self.resultados_label.config(text=f"URL copiada: {url}")
             self.resultados_tabla.delete(*self.resultados_tabla.get_children())
             self.resultados_tabla.insert("", "end", values=("", "", "Cargando URL en el visualizador...", "", ""))
 
@@ -167,7 +157,7 @@ class EmailPreview:
                 self.resultados_tabla.delete(*self.resultados_tabla.get_children())
                 for values, tags in self.original_table_content:
                     self.resultados_tabla.insert("", "end", values=values, tags=tags)
-                self.resultados_label.config(text="Resultados del análisis: Seleccione un enlace para previsualizar")
+                self.resultados_label.config(text="Resultados del análisis: URL copiada al portapapeles")
 
         except Exception as e:
             if self.is_analysis_mode and self.resultados_tabla:
@@ -177,7 +167,7 @@ class EmailPreview:
                 # Restaurar el contenido original en caso de error
                 for values, tags in self.original_table_content:
                     self.resultados_tabla.insert("", "end", values=values, tags=tags)
-                self.resultados_label.config(text="Resultados del análisis: Seleccione un enlace para previsualizar")
+                self.resultados_label.config(text="Resultados del análisis: URL copiada al portapapeles")
             print(f"Error al cargar la URL: {str(e)}")  # Para depuración
 
         self.root.update()

@@ -280,6 +280,48 @@ class ViewManager:
         except Exception as e:
             print(f"Error al abrir el visualizador: {str(e)}")
 
+    def copy_url(self, event=None):
+        """Copia la URL seleccionada al portapapeles cuando se presiona Ctrl+C."""
+        selected_item = self.resultados_tabla.selection()
+        if not selected_item:
+            return
+
+        item = self.resultados_tabla.item(selected_item[0])
+        values = item["values"]
+        url = values[2]  # La URL está en la tercera columna (índice 2)
+
+        # Solo copiar si la fila contiene una URL válida
+        if url and not url.startswith("Fecha de envío:") and not url.startswith("No se encontraron") and not url == "Análisis completado.":
+            self.resultados_tabla.clipboard_clear()
+            self.resultados_tabla.clipboard_append(url)
+
+    def copy_url_context(self):
+        """Copia la URL seleccionada al portapapeles desde el menú contextual."""
+        selected_item = self.resultados_tabla.selection()
+        if not selected_item:
+            return
+
+        item = self.resultados_tabla.item(selected_item[0])
+        values = item["values"]
+        url = values[2]  # La URL está en la tercera columna (índice 2)
+
+        # Solo copiar si la fila contiene una URL válida
+        if url and not url.startswith("Fecha de envío:") and not url.startswith("No se encontraron") and not url == "Análisis completado.":
+            self.resultados_tabla.clipboard_clear()
+            self.resultados_tabla.clipboard_append(url)
+
+    def show_context_menu_results(self, event):
+        """Muestra el menú contextual al hacer clic derecho en resultados_tabla."""
+        # Seleccionar la fila bajo el cursor si no está seleccionada
+        item = self.resultados_tabla.identify_row(event.y)
+        if item:
+            self.resultados_tabla.selection_set(item)
+            # Verificar si la fila contiene una URL válida
+            values = self.resultados_tabla.item(item, "values")
+            url = values[2]  # La URL está en la tercera columna (índice 2)
+            if url and not url.startswith("Fecha de envío:") and not url.startswith("No se encontraron") and not url == "Análisis completado.":
+                self.resultados_context_menu.post(event.x_root, event.y_root)
+
     def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.email_preview.is_analysis_mode = True
@@ -380,5 +422,13 @@ class ViewManager:
 
         # Añadir binding para el evento de doble clic
         self.resultados_tabla.bind("<Double-1>", self.on_resultados_double_click)
+
+        # Añadir bindings para copiar URL
+        self.resultados_tabla.bind("<Control-c>", self.copy_url)
+
+        # Crear menú contextual para resultados_tabla
+        self.resultados_context_menu = tk.Menu(self.resultados_tabla, tearoff=0)
+        self.resultados_context_menu.add_command(label="Copiar enlace", command=self.copy_url_context)
+        self.resultados_tabla.bind("<Button-3>", self.show_context_menu_results)
 
         self.resultados_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")

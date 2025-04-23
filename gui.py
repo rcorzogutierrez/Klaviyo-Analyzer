@@ -31,9 +31,11 @@ class ResultadosApp:
         self.show_local_value = tk.BooleanVar(value=True)
         self.webview_window = None
         self.is_analysis_mode = tk.BooleanVar(value=False)  # Controla si estamos mostrando el panel de resultados
+        self.analyze_all_campaigns = tk.BooleanVar(value=True)  # Checkbox marcado por defecto
         self.template_ids = {}  # Diccionario para almacenar los template_id
         self.resultados_tabla = None  # Inicializar como None
         self.resultados_label = None  # Inicializar como None
+        self.campanas_tabla = None  # Inicializar como None
 
         self.root.title(f"Resultados de Campañas ({list_start_date} a {list_end_date})")
         self.root.after_ids = []
@@ -49,7 +51,7 @@ class ResultadosApp:
         # Crear la instancia de EmailPreview
         self.email_preview = EmailPreview(
             self.webview_window,
-            None,  # campanas_tabla, se asignará después
+            self.campanas_tabla,  # Se asignará después de inicializar
             self.template_ids,
             self.is_analysis_mode,
             self.resultados_tabla,
@@ -62,7 +64,7 @@ class ResultadosApp:
         # Crear la instancia de Exporter
         self.exporter = Exporter(
             self.campanas,
-            None,  # campanas_tabla, se asignará después
+            self.campanas_tabla,  # Se asignará después de inicializar
             tk.StringVar(value="País"),  # grouping_var temporal, se actualizará después
             self.last_results,
             self.is_analysis_mode,
@@ -88,12 +90,24 @@ class ResultadosApp:
             self.exporter
         )
 
-        # Frame para centrar el campo de entrada
+        # Frame para centrar el campo de entrada y el checkbox
         self.entry_frame = tk.Frame(self.main_frame)
         self.entry_frame.grid(row=2, column=0, pady=5)
         tk.Label(self.entry_frame, text="Ingrese códigos de país, palabras clave o números de campaña (separados por coma):", fg="#23376D", font=("TkDefaultFont", 10, "bold")).pack()
         self.entry = tk.Entry(self.entry_frame, width=50)
         self.entry.pack(pady=5)
+        # Deshabilitar el campo de entrada inicialmente, ya que el checkbox está marcado por defecto
+        self.entry.config(state=tk.DISABLED)
+        # Checkbox para analizar todas las campañas
+        self.analyze_all_check = tk.Checkbutton(
+            self.entry_frame,
+            text="Analizar todas las campañas",
+            variable=self.analyze_all_campaigns,
+            fg="#23376D",
+            font=("TkDefaultFont", 10, "bold"),
+            command=self.toggle_entry_state  # Callback para habilitar/deshabilitar el campo de entrada
+        )
+        self.analyze_all_check.pack(pady=5)
 
         # Frame para centrar los botones
         self.buttons_frame = tk.Frame(self.main_frame)
@@ -116,7 +130,11 @@ class ResultadosApp:
                                         activeforeground="white", font=("TkDefaultFont", 10, "bold"))
         self.btn_nuevo_rango.pack(side=tk.LEFT, padx=5)
 
-        # Crear la instancia de Analyzer
+        # Configurar la vista inicial para inicializar campanas_tabla
+        self.grouping_var = tk.StringVar(value="País")
+        self.setup_metrics_view()
+
+        # Crear la instancia de Analyzer después de inicializar campanas_tabla
         self.analyzer = Analyzer(
             self.campanas,
             self.last_results,
@@ -130,21 +148,27 @@ class ResultadosApp:
             self.email_preview,
             self.is_analysis_mode,
             self.setup_analysis_view,
-            self.view_manager.filter_var  # Pasar filter_var para el filtrado
+            self.view_manager.filter_var,
+            self.analyze_all_campaigns,
+            self.campanas_tabla  # Pasar campanas_tabla al Analyzer
         )
 
         # Configurar el comando del botón Analizar y el binding del Entry
         self.btn_analizar.config(command=self.analyzer.analizar)
         self.entry.bind("<Return>", lambda event: self.analyzer.analizar())
 
-        # Configurar la vista inicial con solo la tabla de métricas
-        self.grouping_var = tk.StringVar(value="País")
-        self.setup_metrics_view()
-
         self.root.update()
         self.root.lift()
         self.root.focus_set()
         self.root.after(100, self.entry.focus_set)
+
+    def toggle_entry_state(self):
+        """Habilita o deshabilita el campo de entrada según el estado del checkbox."""
+        if self.analyze_all_campaigns.get():
+            self.entry.config(state=tk.DISABLED)
+        else:
+            self.entry.config(state=tk.NORMAL)
+            self.entry.focus_set()
 
     def setup_metrics_view(self):
         """Configura la vista inicial con solo la tabla de métricas."""
@@ -161,8 +185,13 @@ class ResultadosApp:
         self.grand_total_tabla = self.view_manager.grand_total_tabla
         self.column_widths = self.view_manager.column_widths
         self.left_frame = self.view_manager.left_frame
-        self.analyzer.resultados_tabla = self.resultados_tabla
-        self.analyzer.resultados_label = self.resultados_label
+        # Asegurarse de que self.analyzer exista antes de asignar
+        if hasattr(self, 'analyzer'):
+            self.analyzer.resultados_tabla = self.resultados_tabla
+            self.analyzer.resultados_label = self.resultados_label
+            self.analyzer.campanas_tabla = self.campanas_tabla  # Actualizar en Analyzer
+        self.email_preview.campanas_tabla = self.campanas_tabla  # Actualizar en EmailPreview
+        self.exporter.campanas_tabla = self.campanas_tabla  # Actualizar en Exporter
         self.update_grouping(None)
 
     def setup_analysis_view(self):
@@ -183,6 +212,9 @@ class ResultadosApp:
         self.resultados_label = self.view_manager.resultados_label
         self.analyzer.resultados_tabla = self.resultados_tabla
         self.analyzer.resultados_label = self.resultados_label
+        self.analyzer.campanas_tabla = self.campanas_tabla  # Actualizar en Analyzer
+        self.email_preview.campanas_tabla = self.campanas_tabla  # Actualizar en EmailPreview
+        self.exporter.campanas_tabla = self.campanas_tabla  # Actualizar en Exporter
         self.update_grouping(None)
 
     def cerrar_analisis(self):
@@ -198,7 +230,11 @@ class ResultadosApp:
         self.resultados_label = None
         self.email_preview.resultados_label = None  # Resetear en EmailPreview
         self.analyzer.resultados_label = None  # Resetear en Analyzer
+        # Marcar el checkbox "Analizar todas las campañas" al cerrar
+        self.analyze_all_campaigns.set(True)
         self.setup_metrics_view()
+        # Asegurarse de que el estado del campo de entrada refleje el estado del checkbox
+        self.toggle_entry_state()
 
         self.root.update()
         self.entry.focus_set()
