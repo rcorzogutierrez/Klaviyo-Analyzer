@@ -34,7 +34,7 @@ class Exporter:
 
         try:
             with zipfile.ZipFile(folder, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Siempre exportar las métricas si hay campañas
+                # Exportar campañas si existen
                 if self.campanas:
                     campaigns_filename = f"campaigns_analysis_{datetime.now().strftime('%Y-%m-%d')}_{self.grouping_var.get().lower()}.csv"
                     csv_content = io.StringIO()
@@ -45,24 +45,33 @@ class Exporter:
                     ]
                     writer = csv.DictWriter(csv_content, fieldnames=fieldnames)
                     writer.writeheader()
+
+                    last_fecha = None
                     for item in self.campanas_tabla.get_children():
                         values = self.campanas_tabla.item(item, "values")
-                        row = {
-                            "#": values[0] if values[0] else "",
-                            "Nombre": values[1] if values[1] else "",
-                            "Fecha de Envío": values[2] if values[2] else "",
-                            "Open Rate": values[3] if values[3] else "",
-                            "Click Rate": values[4] if values[4] else "",
-                            "Recibidos": values[5] if values[5] else "",
-                            "Unique Orders": values[6] if values[6] else "",
-                            "Total Value (USD)": values[7] if values[7] else "",
-                            "Total Value (Local)": values[8] if values[8] else "",
-                            "Per Recipient": values[9] if values[9] else "",
-                            "Order Count": values[10] if values[10] else "",
-                            "Subject Line": values[11] if values[11] else "",
-                            "Preview Text": values[12] if values[12] else "",
-                        }
-                        writer.writerow(row)
+
+                        # Línea de fecha o prefijo (grupo)
+                        if all(v == "" for v in values[1:]) and values[0]:
+                            if values[0] != last_fecha and values[0].count("-") == 2:
+                                writer.writerow({})
+                                last_fecha = values[0]
+                            writer.writerow({fieldnames[0]: values[0]})
+                            continue
+
+                        # Línea de subtotal
+                        if values[1] == "Subtotal":
+                            row = dict(zip(fieldnames, values))
+                            writer.writerow(row)
+                            continue
+
+                        # Línea de campaña (real)
+                        try:
+                            int(values[0])
+                            row = dict(zip(fieldnames, values))
+                            writer.writerow(row)
+                        except (ValueError, IndexError):
+                            continue
+
                     zipf.writestr(campaigns_filename, csv_content.getvalue())
                     if self.is_analysis_mode and self.resultados_tabla:
                         self.resultados_tabla.insert("", "end", values=("", "", f"Archivo CSV creado: {campaigns_filename}", "", ""))

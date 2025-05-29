@@ -249,7 +249,7 @@ class ResultadosApp:
             self.campanas_tabla.column("OrderSumValueLocal", width=0, anchor="e", stretch=tk.NO)
         self.update_grouping(None)
 
-    def update_grouping(self, event):
+    def update_grouping(self, event=None):
         # Limpiar el diccionario de template_ids antes de actualizar la tabla
         self.template_ids.clear()
         
