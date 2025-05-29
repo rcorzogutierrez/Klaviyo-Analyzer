@@ -6,6 +6,7 @@ from config import ALLOWED_CODES, COUNTRY_TO_CURRENCY, CURRENCY_SYMBOLS, HEADERS
 from klaviyo_api import get_campaign_metrics, get_campaign_details, preload_campaign_details, query_metric_aggregates_post
 from exchange_rates import obtener_tasas_de_cambio
 from utils import format_number, format_percentage
+from collections import defaultdict
 
 def obtener_campanas(list_start_date, list_end_date, update_callback):
     # Obtener el ID de la métrica de conversión
@@ -190,27 +191,31 @@ def agrupar_por_fecha(campanas):
         grupos[date_only].append(camp)
     return grupos
 
-def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value=True, template_ids_dict=None):
-    tree.delete(*tree.get_children())  # Limpiar la tabla antes de mostrar nuevos datos
-    
-    # Definir las columnas (sin "TemplateID")
-    columns = ("Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique", "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview")
-    tree["columns"] = columns
-    tree.heading("Numero", text="#")
-    tree.heading("Nombre", text="Nombre")
-    tree.heading("FechaEnvio", text="Fecha de Envío")
-    tree.heading("OpenRate", text="Open Rate")
-    tree.heading("ClickRate", text="Click Rate")
-    tree.heading("Recibios", text="Recibidos")
-    tree.heading("OrderUnique", text="Unique Orders")
-    tree.heading("OrderSumValue", text="Total Value (USD)")
-    tree.heading("OrderSumValueLocal", text="Total Value (Local)")
-    tree.heading("OrderCount", text="Order Count")
-    tree.heading("Subject", text="Subject Line")
-    tree.heading("Preview", text="Preview Text")
-    tree.heading("PerRecipient", text="Per Recipient")
+def agrupar_por_fecha_y_prefijo(campanas):
+    """Agrupa campañas por fecha, y dentro de cada fecha, por prefijo (ecom, cross, etc)."""
+    grupos = defaultdict(lambda: defaultdict(list))
+    for camp in campanas:
+        _, _, name, send_time, *_ = camp
+        try:
+            fecha = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
+        except ValueError:
+            fecha = send_time  # fallback si send_time no tiene formato esperado
 
-    # Ajustar anchos y alineaciones de las columnas (eliminamos TemplateID)
+        prefijo = name.split("_")[0].lower() if "_" in name else "otro"
+        grupos[fecha][prefijo].append(camp)
+    return grupos
+
+
+def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value=True, template_ids_dict=None):
+    tree.delete(*tree.get_children())
+
+    columns = ("Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
+               "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview")
+    tree["columns"] = columns
+    for col, text in zip(columns, ("#", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", "Unique Orders",
+                                   "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Subject Line", "Preview Text")):
+        tree.heading(col, text=text)
+
     tree.column("Numero", width=50, anchor="center")
     tree.column("Nombre", width=120)
     tree.column("FechaEnvio", width=100)
@@ -219,7 +224,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
     tree.column("Recibios", width=100, anchor="center")
     tree.column("OrderUnique", width=80, anchor="center")
     tree.column("OrderSumValue", width=120, anchor="e")
-    tree.column("OrderSumValueLocal", width=120 if show_local_value else 0, anchor="e", stretch=True if show_local_value else False)
+    tree.column("OrderSumValueLocal", width=120 if show_local_value else 0, anchor="e", stretch=show_local_value)
     tree.column("PerRecipient", width=120, anchor="e")
     tree.column("OrderCount", width=80, anchor="center")
     tree.column("Subject", width=150)
@@ -231,24 +236,24 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
         currency = COUNTRY_TO_CURRENCY.get(country_code, "USD")
         currency_symbol = CURRENCY_SYMBOLS.get(currency, "$")
-        
+
         values = [
             idx,
             name,
             send_time,
             format_percentage(open_rate),
             format_percentage(click_rate),
-            format_number(delivered),  # Separadores de miles para Recibidos
-            format_number(int(order_unique)),  # Convertir a entero y agregar separadores de miles
-            format_number(order_sum_value, is_currency=True),  # Separadores de miles para Total Value (USD)
+            format_number(delivered),
+            format_number(int(order_unique)),
+            format_number(order_sum_value, is_currency=True),
         ]
         if show_local_value:
-            values.append(format_number(order_sum_value_local, is_currency=True, currency_symbol=currency_symbol))  # Separadores de miles para Total Value (Local)
+            values.append(format_number(order_sum_value_local, is_currency=True, currency_symbol=currency_symbol))
         else:
             values.append("")
-        values.append(format_number(per_recipient, is_currency=True))  # Separadores de miles para Per Recipient
+        values.append(format_number(per_recipient, is_currency=True))
         values.extend([
-            format_number(int(order_count)),  # Convertir a entero y agregar separadores de miles
+            format_number(int(order_count)),
             subject,
             preview,
         ])
@@ -265,7 +270,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         total_count = 0
         total_per_recipient_weighted = 0
         total_delivered_for_weight = 0
-        
+
         for camp in camps:
             _, _, _, _, open_rate, click_rate, delivered, _, _, _, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
             total_delivered += delivered
@@ -278,7 +283,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             total_count += order_count
             total_per_recipient_weighted += per_recipient * delivered
             total_delivered_for_weight += delivered
-        
+
         if total_weight > 0:
             avg_open_rate = round((weighted_open / total_weight) * 100, 2)
             avg_click_rate = round((weighted_click / total_weight) * 100, 2)
@@ -289,17 +294,17 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
                 "",
                 format_percentage(avg_open_rate),
                 format_percentage(avg_click_rate),
-                format_number(total_delivered),  # Separadores de miles para Recibidos
-                format_number(int(total_unique)),  # Convertir a entero y agregar separadores de miles
-                format_number(total_sum_value, is_currency=True),  # Separadores de miles para Total Value (USD)
+                format_number(total_delivered),
+                format_number(int(total_unique)),
+                format_number(total_sum_value, is_currency=True),
             ]
             if show_local_value:
-                values.append(format_number(total_sum_value_local, is_currency=True, currency_symbol="$"))  # Separadores de miles para Total Value (Local)
+                values.append(format_number(total_sum_value_local, is_currency=True))
             else:
                 values.append("")
-            values.append(format_number(per_recipient_weighted_avg, is_currency=True))  # Separadores de miles para Per Recipient
+            values.append(format_number(per_recipient_weighted_avg, is_currency=True))
             values.extend([
-                format_number(int(total_count)),  # Convertir a entero y agregar separadores de miles
+                format_number(int(total_count)),
                 "",
                 "",
             ])
@@ -316,7 +321,6 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             }
         return None, None
 
-    # Lista para almacenar los datos de los subtotales
     all_subtotals = []
 
     if grouping == "País":
@@ -325,38 +329,48 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             tree.insert("", "end", values=(f"{pais.upper()}", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
             for camp in sorted(grupos[pais], key=lambda x: x[0]):
                 values = add_campaign_row(camp, show_local_value)
-                # Insertar la fila y asignar el campaign_id como tag
-                idx, campaign_id, _, _, _, _, _, _, _, template_id, _, _, _, _, _ = camp
+                idx = camp[0]
+                campaign_id = camp[1]
+                template_id = camp[9]
                 item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
-                # Almacenar el template_id en el diccionario
-                if template_ids_dict is not None:
-                    if template_id is not None:
-                        template_ids_dict[item_id] = template_id
-            
+                if template_ids_dict is not None and template_id is not None:
+                    template_ids_dict[item_id] = template_id
+
             subtotal_values, subtotal_data = calculate_subtotals(grupos[pais], show_local_value)
             if subtotal_values:
                 tree.insert("", "end", values=subtotal_values, tags=("bold",))
                 all_subtotals.append(subtotal_data)
-            tree.insert("", "end", values=("", "", "", "", "", "", "", "", "", "", "", "", ""))
-    else:  # Fecha
-        grupos = agrupar_por_fecha(campanas)
-        for fecha in sorted(grupos.keys()):
+            tree.insert("", "end", values=("",) * 13)
+    else:
+        grupos_fecha = defaultdict(lambda: defaultdict(list))
+        for camp in campanas:
+            _, _, name, send_time, *_ = camp
+            try:
+                fecha = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
+            except ValueError:
+                fecha = send_time
+            prefijo = name.split("_")[0].lower() if "_" in name else "otro"
+            grupos_fecha[fecha][prefijo].append(camp)
+
+        for fecha in sorted(grupos_fecha.keys()):
             tree.insert("", "end", values=(fecha, "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
-            for camp in sorted(grupos[fecha], key=lambda x: x[0]):
-                values = add_campaign_row(camp, show_local_value=False)
-                # Insertar la fila y asignar el campaign_id como tag
-                idx, campaign_id, _, _, _, _, _, _, _, template_id, _, _, _, _, _ = camp
-                item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
-                # Almacenar el template_id en el diccionario
-                if template_ids_dict is not None:
-                    if template_id is not None:
+            for prefijo in sorted(grupos_fecha[fecha].keys()):               
+                tree.insert("", "end", values=(prefijo, "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
+
+                for camp in sorted(grupos_fecha[fecha][prefijo], key=lambda x: x[0]):
+                    values = add_campaign_row(camp, show_local_value=False)
+                    idx = camp[0]
+                    campaign_id = camp[1]
+                    template_id = camp[9]
+                    item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
+                    if template_ids_dict is not None and template_id is not None:
                         template_ids_dict[item_id] = template_id
-            
-            subtotal_values, subtotal_data = calculate_subtotals(grupos[fecha], show_local_value=False)
-            if subtotal_values:
-                tree.insert("", "end", values=subtotal_values, tags=("bold",))
-                all_subtotals.append(subtotal_data)
-            tree.insert("", "end", values=("", "", "", "", "", "", "", "", "", "", "", "", ""))
+
+                subtotal_values, subtotal_data = calculate_subtotals(grupos_fecha[fecha][prefijo], show_local_value=False)
+                if subtotal_values:
+                    tree.insert("", "end", values=subtotal_values, tags=("bold",))
+                    all_subtotals.append(subtotal_data)
+                tree.insert("", "end", values=("",) * 13)
 
     return all_subtotals
 

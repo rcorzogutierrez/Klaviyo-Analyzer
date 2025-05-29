@@ -27,7 +27,7 @@ def get_campaign_metrics(start_date, end_date, conversion_metric_id, update_call
             "attributes": {
                 "timeframe": {"start": fecha_inicio, "end": fecha_fin},
                 "conversion_metric_id": conversion_metric_id,
-                "statistics": ["open_rate", "click_rate", "delivered"]
+                "statistics": ["open_rate", "click_rate", "delivered", "delivery_rate"] 
             }
         }
     }
