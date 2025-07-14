@@ -28,7 +28,7 @@ class ResultadosApp:
         self.list_start_date = list_start_date
         self.list_end_date = list_end_date
         self.last_results = {}
-        self.show_local_value = tk.BooleanVar(value=True)
+        self.show_local_value = tk.BooleanVar(value=False)
         self.webview_window = None
         self.is_analysis_mode = tk.BooleanVar(value=False)  # Controla si estamos mostrando el panel de resultados
         self.analyze_all_campaigns = tk.BooleanVar(value=True)  # Checkbox marcado por defecto
@@ -131,7 +131,7 @@ class ResultadosApp:
         self.btn_nuevo_rango.pack(side=tk.LEFT, padx=5)
 
         # Configurar la vista inicial para inicializar campanas_tabla
-        self.grouping_var = tk.StringVar(value="País")
+        self.grouping_var = tk.StringVar(value="Fecha")
         self.setup_metrics_view()
 
         # Crear la instancia de Analyzer después de inicializar campanas_tabla
