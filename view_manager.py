@@ -178,7 +178,7 @@ class ViewManager:
 
         self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), background="#23376D", foreground="white")
 
-    def setup_metrics_view(self, entry_frame, buttons_frame, grouping_var, show_local_value, update_grouping_callback):
+    def setup_metrics_view(self, entry_frame, buttons_frame, grouping_var, show_local_value, update_grouping_callback, start_date, end_date):
         """Configura la vista inicial con solo la tabla de métricas."""
         # Limpiar el frame principal, pero preservar el campo de entrada y los botones
         for widget in self.main_frame.winfo_children():
@@ -203,7 +203,10 @@ class ViewManager:
         tk.Checkbutton(control_frame, text="Mostrar Total Value (Local)", variable=show_local_value,
                        command=update_grouping_callback, fg="#23376D").pack(side=tk.LEFT, padx=5)
        
-        tk.Label(self.left_frame, text="Campañas en el rango seleccionado:", fg="#23376D", font=("TkDefaultFont", 12, "bold")).grid(row=1, column=0, sticky="ew", pady=5)
+        # Label con el rango de fechas
+        range_label = tk.Label(self.left_frame, text=f"Campañas en el rango seleccionado: {start_date} a {end_date}", 
+                              fg="#23376D", font=("TkDefaultFont", 12, "bold"))
+        range_label.grid(row=1, column=0, sticky="ew", pady=5)
 
         # Frame para el Treeview con scrollbar
         treeview_frame = tk.Frame(self.left_frame)
@@ -322,7 +325,7 @@ class ViewManager:
             if url and not url.startswith("Fecha de envío:") and not url.startswith("No se encontraron") and not url == "Análisis completado.":
                 self.resultados_context_menu.post(event.x_root, event.y_root)
 
-    def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None):
+    def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None, start_date=None, end_date=None):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.email_preview.is_analysis_mode = True
         self.exporter.is_analysis_mode = True
@@ -354,7 +357,10 @@ class ViewManager:
         tk.Checkbutton(control_frame, text="Mostrar Total Value (Local)", variable=show_local_value,
                        command=update_grouping_callback, fg="#23376D").pack(side=tk.LEFT, padx=5)
 
-        tk.Label(self.left_frame, text="Campañas en el rango seleccionado:", fg="#23376D", font=("TkDefaultFont", 12, "bold")).grid(row=1, column=0, sticky="ew", pady=5)
+        # Label con el rango de fechas
+        range_label = tk.Label(self.left_frame, text=f"Campañas en el rango seleccionado: {start_date or ''} a {end_date or ''}", 
+                              fg="#23376D", font=("TkDefaultFont", 12, "bold"))
+        range_label.grid(row=1, column=0, sticky="ew", pady=5)
 
         # Frame para el Treeview con scrollbar
         treeview_frame = tk.Frame(self.left_frame)

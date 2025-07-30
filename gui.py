@@ -92,7 +92,7 @@ class ResultadosApp:
 
         # Frame para centrar el campo de entrada y el checkbox
         self.entry_frame = tk.Frame(self.main_frame)
-        self.entry_frame.grid(row=2, column=0, pady=5)
+        self.entry_frame.grid(row=2, column=0, pady=5, sticky="ew")
         tk.Label(self.entry_frame, text="Ingrese códigos de país, palabras clave o números de campaña (separados por coma):", fg="#23376D", font=("TkDefaultFont", 10, "bold")).pack()
         self.entry = tk.Entry(self.entry_frame, width=50)
         self.entry.pack(pady=5)
@@ -105,13 +105,13 @@ class ResultadosApp:
             variable=self.analyze_all_campaigns,
             fg="#23376D",
             font=("TkDefaultFont", 10, "bold"),
-            command=self.toggle_entry_state  # Callback para habilitar/deshabilitar el campo de entrada
+            command=self.toggle_entry_state
         )
         self.analyze_all_check.pack(pady=5)
 
         # Frame para centrar los botones
         self.buttons_frame = tk.Frame(self.main_frame)
-        self.buttons_frame.grid(row=3, column=0, pady=10)
+        self.buttons_frame.grid(row=3, column=0, pady=10, sticky="ew")
         self.frame_botones = tk.Frame(self.buttons_frame)
         self.frame_botones.pack()
         self.btn_analizar = tk.Button(self.frame_botones, text="Analizar", 
@@ -150,7 +150,7 @@ class ResultadosApp:
             self.setup_analysis_view,
             self.view_manager.filter_var,
             self.analyze_all_campaigns,
-            self.campanas_tabla  # Pasar campanas_tabla al Analyzer
+            self.campanas_tabla
         )
 
         # Configurar el comando del botón Analizar y el binding del Entry
@@ -179,7 +179,9 @@ class ResultadosApp:
             self.buttons_frame,
             self.grouping_var,
             self.show_local_value,
-            self.update_grouping
+            self.update_grouping,
+            self.list_start_date,
+            self.list_end_date
         )
         self.campanas_tabla = self.view_manager.campanas_tabla
         self.grand_total_tabla = self.view_manager.grand_total_tabla
@@ -189,9 +191,9 @@ class ResultadosApp:
         if hasattr(self, 'analyzer'):
             self.analyzer.resultados_tabla = self.resultados_tabla
             self.analyzer.resultados_label = self.resultados_label
-            self.analyzer.campanas_tabla = self.campanas_tabla  # Actualizar en Analyzer
-        self.email_preview.campanas_tabla = self.campanas_tabla  # Actualizar en EmailPreview
-        self.exporter.campanas_tabla = self.campanas_tabla  # Actualizar en Exporter
+            self.analyzer.campanas_tabla = self.campanas_tabla
+        self.email_preview.campanas_tabla = self.campanas_tabla
+        self.exporter.campanas_tabla = self.campanas_tabla
         self.update_grouping(None)
 
     def setup_analysis_view(self):
@@ -202,7 +204,9 @@ class ResultadosApp:
             self.show_local_value,
             self.update_grouping,
             self.cerrar_analisis,
-            self.analyzer.apply_filter  # Pasar el método apply_filter como filter_callback
+            self.analyzer.apply_filter,
+            self.list_start_date,
+            self.list_end_date
         )
         self.campanas_tabla = self.view_manager.campanas_tabla
         self.grand_total_tabla = self.view_manager.grand_total_tabla
@@ -212,28 +216,26 @@ class ResultadosApp:
         self.resultados_label = self.view_manager.resultados_label
         self.analyzer.resultados_tabla = self.resultados_tabla
         self.analyzer.resultados_label = self.resultados_label
-        self.analyzer.campanas_tabla = self.campanas_tabla  # Actualizar en Analyzer
-        self.email_preview.campanas_tabla = self.campanas_tabla  # Actualizar en EmailPreview
-        self.exporter.campanas_tabla = self.campanas_tabla  # Actualizar en Exporter
+        self.analyzer.campanas_tabla = self.campanas_tabla
+        self.email_preview.campanas_tabla = self.campanas_tabla
+        self.exporter.campanas_tabla = self.campanas_tabla
         self.update_grouping(None)
 
     def cerrar_analisis(self):
         """Cierra el panel de análisis y restaura la vista de métricas."""
         self.is_analysis_mode.set(False)
-        self.email_preview.is_analysis_mode = self.is_analysis_mode  # Actualizar en EmailPreview
-        self.exporter.is_analysis_mode = self.is_analysis_mode  # Actualizar en Exporter
-        self.last_results.clear()  # Limpiar los resultados del análisis
+        self.email_preview.is_analysis_mode = self.is_analysis_mode
+        self.exporter.is_analysis_mode = self.is_analysis_mode
+        self.last_results.clear()
         self.resultados_tabla = None
-        self.email_preview.resultados_tabla = None  # Resetear en EmailPreview
-        self.exporter.resultados_tabla = None  # Resetear en Exporter
-        self.analyzer.resultados_tabla = None  # Resetear en Analyzer
+        self.email_preview.resultados_tabla = None
+        self.exporter.resultados_tabla = None
+        self.analyzer.resultados_tabla = None
         self.resultados_label = None
-        self.email_preview.resultados_label = None  # Resetear en EmailPreview
-        self.analyzer.resultados_label = None  # Resetear en Analyzer
-        # Marcar el checkbox "Analizar todas las campañas" al cerrar
+        self.email_preview.resultados_label = None
+        self.analyzer.resultados_label = None
         self.analyze_all_campaigns.set(True)
         self.setup_metrics_view()
-        # Asegurarse de que el estado del campo de entrada refleje el estado del checkbox
         self.toggle_entry_state()
 
         self.root.update()
@@ -250,17 +252,15 @@ class ResultadosApp:
         self.update_grouping(None)
 
     def update_grouping(self, event=None):
-        # Limpiar el diccionario de template_ids antes de actualizar la tabla
         self.template_ids.clear()
         
         try:
-            # Llamar a mostrar_campanas_en_tabla y pasar self.template_ids para que lo llene
             all_subtotals = mostrar_campanas_en_tabla(
                 self.campanas, 
                 self.campanas_tabla, 
                 self.grouping_var.get(), 
                 self.show_local_value.get(),
-                template_ids_dict=self.template_ids  # Pasar el diccionario para almacenar los template_id
+                template_ids_dict=self.template_ids
             )
         except Exception as e:
             print(f"Error al actualizar la tabla de campañas: {str(e)}")
@@ -311,7 +311,7 @@ class ResultadosApp:
         if self.webview_window:
             self.webview_window.destroy()
             self.webview_window = None
-            self.email_preview.webview_window[0] = None  # Actualizar en EmailPreview
+            self.email_preview.webview_window[0] = None
 
         for after_id in list(self.root.after_ids):
             self.root.after_cancel(after_id)
@@ -347,9 +347,15 @@ def abrir_resultados(list_start_date, list_end_date):
     if error:
         texto_resultados.delete(1.0, tk.END)
         texto_resultados.insert(tk.END, f"Error al cargar campañas: {error}\n")
-        tk.Button(root, text="Cerrar", command=lambda: [root.quit(), root.destroy()], 
+        # Frame para centrar los botones
+        buttons_frame = tk.Frame(root)
+        buttons_frame.pack(pady=10)
+        tk.Button(buttons_frame, text="Cerrar", command=lambda: [root.quit(), root.destroy()], 
                  bg="#23376D", fg="white", activebackground="#3A4F9A", 
-                 activeforeground="white", font=("TkDefaultFont", 10, "bold")).pack(pady=10)
+                 activeforeground="white", font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        tk.Button(buttons_frame, text="Nuevo rango de fecha", command=lambda: [root.quit(), root.destroy(), main()], 
+                 bg="#23376D", fg="white", activebackground="#3A4F9A", 
+                 activeforeground="white", font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
     else:
         texto_resultados.pack_forget()
         app = ResultadosApp(root, campanas, list_start_date, list_end_date)
