@@ -14,6 +14,8 @@ KLAVIYO_URLS = {
     "METRIC_AGGREGATES": "https://a.klaviyo.com/api/metric-aggregates",
     "METRICS": "https://a.klaviyo.com/api/metrics",
     "EVENTS": "https://a.klaviyo.com/api/events",
+    "LISTS": "https://a.klaviyo.com/api/lists/",
+    "SEGMENTS": "https://a.klaviyo.com/api/segments/",
 }
 
 # URL para obtener tasas de cambio desde Open Exchange Rates

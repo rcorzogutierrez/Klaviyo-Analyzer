@@ -5,6 +5,330 @@ import time
 from datetime import datetime, timezone, timedelta
 from config import HEADERS_KLAVIYO, KLAVIYO_URLS  # Importar solo lo necesario
 
+# Modificaciones necesarias en klaviyo_api.py
+
+def get_campaign_audiences(campaign_data, update_callback=None):
+    """
+    Extrae información de audiencias (listas y segmentos) de los datos de campaña.
+
+    Args:
+        campaign_data (dict): Datos de la campaña obtenidos de la API.
+        update_callback (callable, optional): Función para actualizar el estado en la UI.
+
+    Returns:
+        str: Información formateada de las audiencias incluidas y excluidas con nombres.
+    """
+    try:
+        # Obtener audiencias desde los atributos de la campaña
+        audiences = campaign_data['data']['attributes'].get('audiences', {})
+        
+        if not audiences:
+            return "N/A"
+            
+        included = audiences.get('included', [])
+        excluded = audiences.get('excluded', [])
+        
+        # Formatear la información con nombres reales
+        result_parts = []
+        
+        if included:
+            # Obtener nombres de audiencias incluidas
+            included_names = get_audience_names(included, update_callback)
+            if included_names:
+                # Mostrar solo los primeros 2 nombres completos para evitar texto muy largo
+                included_display = included_names[:2]
+                if len(included) > 2:
+                    included_display.append(f"+{len(included) - 2}")
+                result_parts.append(f"Inc: {', '.join(included_display)}")
+        
+        if excluded:
+            # Obtener nombres de audiencias excluidas
+            excluded_names = get_audience_names(excluded, update_callback)
+            if excluded_names:
+                # Mostrar solo los primeros 2 nombres completos
+                excluded_display = excluded_names[:2]
+                if len(excluded) > 2:
+                    excluded_display.append(f"+{len(excluded) - 2}")
+                result_parts.append(f"Exc: {', '.join(excluded_display)}")
+        
+        return "; ".join(result_parts) if result_parts else "N/A"
+        
+    except (KeyError, TypeError) as e:
+        if update_callback:
+            update_callback(f"Error al obtener audiencias: {str(e)}")
+        return "N/A"
+
+def get_audience_names(audience_ids, update_callback=None):
+    """
+    Obtiene los nombres de las audiencias basándose en sus IDs.
+    
+    Args:
+        audience_ids (list): Lista de IDs de audiencias.
+        update_callback (callable, optional): Función para actualizar el estado en la UI.
+    
+    Returns:
+        list: Lista de nombres de audiencias.
+    """
+    names = []
+    
+    # Limitar a 3 audiencias para evitar demasiadas llamadas a la API
+    for audience_id in audience_ids[:3]:
+        try:
+            # Primero intentar obtener como lista
+            url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
+            response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                names.append(name)
+                continue
+            elif response.status_code == 429:
+                # Manejar rate limiting
+                retry_after = int(response.headers.get('Retry-After', 10))
+                if update_callback:
+                    update_callback(f"Rate limit alcanzado. Esperando {retry_after} segundos...")
+                time.sleep(retry_after)
+                # Reintentar la misma solicitud
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                    names.append(name)
+                    continue
+            
+            # Si no es una lista, intentar como segmento
+            url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
+            response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                names.append(name)
+            elif response.status_code == 429:
+                # Manejar rate limiting para segmentos
+                retry_after = int(response.headers.get('Retry-After', 10))
+                if update_callback:
+                    update_callback(f"Rate limit alcanzado. Esperando {retry_after} segundos...")
+                time.sleep(retry_after)
+                # Reintentar la misma solicitud
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                    names.append(name)
+                else:
+                    names.append(f"ID-{audience_id[:8]}")
+            else:
+                names.append(f"ID-{audience_id[:8]}")
+                
+        except Exception as e:
+            if update_callback:
+                update_callback(f"Error al obtener nombre de audiencia {audience_id}: {str(e)}")
+            names.append(f"ID-{audience_id[:8]}")
+            
+        # Pequeña pausa entre solicitudes para evitar rate limiting
+        time.sleep(0.1)
+    
+    # Si hay más de 3 audiencias, añadir indicador
+    if len(audience_ids) > 3:
+        names.append(f"+{len(audience_ids) - 3} más")
+    
+    return names
+
+# Modificación en get_campaign_details para usar cache de audiencias
+def get_campaign_details(campaign_id, cache, update_callback=None, audience_cache=None):
+    """
+    Obtiene detalles de una campaña específica desde la API de Klaviyo.
+
+    Args:
+        campaign_id (str): ID de la campaña en Klaviyo.
+        cache (dict): Diccionario para almacenar los detalles en caché.
+        update_callback (callable, optional): Función para actualizar el estado en la UI.
+        audience_cache (dict, optional): Cache de nombres de audiencias.
+
+    Returns:
+        tuple: (campaign_name, send_time, subject_line, preview_text, template_id, audiences_info)
+    """
+    if campaign_id in cache:
+        return cache[campaign_id]
+    
+    url = f"{KLAVIYO_URLS['CAMPAIGN_DETAILS']}{campaign_id}/"
+    
+    while True:
+        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+        if response.status_code == 200:
+            campaign_data = response.json()
+            campaign_name = campaign_data['data']['attributes'].get('name', f"Campaign {campaign_id}")
+            send_time = campaign_data['data']['attributes'].get('send_time', 'N/A')
+            
+            if send_time != 'N/A':
+                send_time = datetime.fromisoformat(send_time.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Obtener el subject line, preview text y template_id desde los mensajes de la campaña
+            subject_line, preview_text, template_id = get_campaign_message_subject(campaign_data, update_callback)
+
+            # Obtener información de audiencias con nombres si hay cache disponible
+            if audience_cache:
+                audiences_info = get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback)
+            else:
+                audiences_info = get_campaign_audiences(campaign_data, update_callback)
+
+            if update_callback:
+                update_callback(f"Obteniendo detalles de la campaña {campaign_name}")
+            
+            result = (campaign_name, send_time, subject_line, preview_text, template_id, audiences_info)
+            cache[campaign_id] = result
+            return result
+            
+        elif response.status_code == 429:
+            retry_after = int(response.headers.get('Retry-After', 17))
+            if update_callback:
+                update_callback(f"Solicitud limitada para ID {campaign_id}. Esperando {retry_after} segundos antes de reintentar")
+            time.sleep(retry_after)
+        else:
+            if update_callback:
+                update_callback(f"Error al obtener la campaña {campaign_id}: {response.status_code} - {response.text}")
+            return f"Campaign {campaign_id}", 'N/A', "No Subject Line", "No Preview Text", None, "N/A"
+
+def get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback=None):
+    """
+    Extrae información de audiencias usando un cache de nombres precargado.
+    
+    Args:
+        campaign_data (dict): Datos de la campaña.
+        audience_cache (dict): Cache con nombres de audiencias.
+        update_callback (callable, optional): Función para actualizar el estado.
+    
+    Returns:
+        str: Información formateada de las audiencias.
+    """
+    try:
+        audiences = campaign_data['data']['attributes'].get('audiences', {})
+        
+        if not audiences:
+            return "N/A"
+            
+        included = audiences.get('included', [])
+        excluded = audiences.get('excluded', [])
+        
+        result_parts = []
+        
+        if included:
+            # Usar cache para obtener nombres
+            included_names = []
+            for audience_id in included[:2]:  # Mostrar solo los primeros 2
+                name = audience_cache.get(audience_id, f"ID-{audience_id[:8]}")
+                # Truncar nombres muy largos
+                if len(name) > 15:
+                    name = name[:12] + "..."
+                included_names.append(name)
+            
+            if len(included) > 2:
+                included_names.append(f"+{len(included) - 2}")
+            
+            result_parts.append(f"Inc: {', '.join(included_names)}")
+        
+        if excluded:
+            excluded_names = []
+            for audience_id in excluded[:2]:  # Mostrar solo los primeros 2
+                name = audience_cache.get(audience_id, f"ID-{audience_id[:8]}")
+                # Truncar nombres muy largos
+                if len(name) > 15:
+                    name = name[:12] + "..."
+                excluded_names.append(name)
+            
+            if len(excluded) > 2:
+                excluded_names.append(f"+{len(excluded) - 2}")
+            
+            result_parts.append(f"Exc: {', '.join(excluded_names)}")
+        
+        return "; ".join(result_parts) if result_parts else "N/A"
+        
+    except (KeyError, TypeError) as e:
+        if update_callback:
+            update_callback(f"Error al obtener audiencias con cache: {str(e)}")
+        return "N/A"
+
+# También necesitas agregar esta función auxiliar para optimizar las llamadas
+def batch_get_audience_names(audience_ids_list, update_callback=None):
+    """
+    Obtiene nombres de audiencias en lotes para optimizar las llamadas a la API.
+    
+    Args:
+        audience_ids_list (list): Lista de listas de IDs de audiencias.
+        update_callback (callable, optional): Función para actualizar el estado en la UI.
+    
+    Returns:
+        dict: Diccionario con audience_id como clave y nombre como valor.
+    """
+    # Crear un set único de todos los IDs de audiencias
+    all_audience_ids = set()
+    for audience_ids in audience_ids_list:
+        all_audience_ids.update(audience_ids)
+    
+    # Cache para almacenar los nombres obtenidos
+    audience_names_cache = {}
+    
+    if update_callback:
+        update_callback(f"Obteniendo nombres de {len(all_audience_ids)} audiencias únicas...")
+    
+    for i, audience_id in enumerate(all_audience_ids):
+        try:
+            if update_callback and i % 10 == 0:  # Actualizar cada 10 audiencias
+                update_callback(f"Procesando audiencia {i+1}/{len(all_audience_ids)}")
+            
+            # Primero intentar como lista
+            url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
+            response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                audience_names_cache[audience_id] = name
+                continue
+            elif response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', 10))
+                time.sleep(retry_after)
+                # Reintentar
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                    audience_names_cache[audience_id] = name
+                    continue
+            
+            # Intentar como segmento
+            url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
+            response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                audience_names_cache[audience_id] = name
+            elif response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', 10))
+                time.sleep(retry_after)
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                    audience_names_cache[audience_id] = name
+                else:
+                    audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+            else:
+                audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+                
+        except Exception as e:
+            if update_callback:
+                update_callback(f"Error al obtener audiencia {audience_id}: {str(e)}")
+            audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+        
+        # Pausa pequeña entre solicitudes
+        time.sleep(0.1)
+    
+    return audience_names_cache
+
 def get_campaign_metrics(start_date, end_date, conversion_metric_id, update_callback=None):
     """
     Obtiene métricas de campañas (open rate, click rate, delivered) desde la API de Klaviyo.
@@ -51,47 +375,6 @@ def get_campaign_metrics(start_date, end_date, conversion_metric_id, update_call
     if update_callback:
         update_callback(f"Total de páginas obtenidas: {page_count}")
     return all_data
-
-def get_campaign_details(campaign_id, cache, update_callback=None):
-    """
-    Obtiene detalles de una campaña específica desde la API de Klaviyo.
-
-    Args:
-        campaign_id (str): ID de la campaña en Klaviyo.
-        cache (dict): Diccionario para almacenar los detalles en caché.
-        update_callback (callable, optional): Función para actualizar el estado en la UI.
-
-    Returns:
-        tuple: (campaign_name, send_time, subject_line, preview_text, template_id)
-    """
-    if campaign_id in cache:
-        return cache[campaign_id]
-    url = f"{KLAVIYO_URLS['CAMPAIGN_DETAILS']}{campaign_id}/"
-    while True:
-        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
-        if response.status_code == 200:
-            campaign_data = response.json()
-            campaign_name = campaign_data['data']['attributes'].get('name', f"Campaign {campaign_id}")
-            send_time = campaign_data['data']['attributes'].get('send_time', 'N/A')
-            if send_time != 'N/A':
-                send_time = datetime.fromisoformat(send_time.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
-
-            # Obtener el subject line, preview text y template_id desde los mensajes de la campaña
-            subject_line, preview_text, template_id = get_campaign_message_subject(campaign_data, update_callback)
-
-            if update_callback:
-                update_callback(f"Obteniendo detalles de la campaña {campaign_name}")
-            cache[campaign_id] = (campaign_name, send_time, subject_line, preview_text, template_id)
-            return campaign_name, send_time, subject_line, preview_text, template_id
-        elif response.status_code == 429:
-            retry_after = int(response.headers.get('Retry-After', 17))
-            if update_callback:
-                update_callback(f"Solicitud limitada para ID {campaign_id}. Esperando {retry_after} segundos antes de reintentar")
-            time.sleep(retry_after)
-        else:
-            if update_callback:
-                update_callback(f"Error al obtener la campaña {campaign_id}: {response.status_code} - {response.text}")
-            return f"Campaign {campaign_id}", 'N/A', "No Subject Line", "No Preview Text", None
 
 def get_campaign_message_subject(campaign_data, update_callback=None):
     """

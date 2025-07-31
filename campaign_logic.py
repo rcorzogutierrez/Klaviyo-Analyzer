@@ -3,10 +3,140 @@ import requests
 from collections import defaultdict
 from datetime import datetime, timezone
 from config import ALLOWED_CODES, COUNTRY_TO_CURRENCY, CURRENCY_SYMBOLS, HEADERS_KLAVIYO, CURRENCIES, KLAVIYO_URLS
-from klaviyo_api import get_campaign_metrics, get_campaign_details, preload_campaign_details, query_metric_aggregates_post
+from klaviyo_api import get_campaign_metrics, get_campaign_details, preload_campaign_details, query_metric_aggregates_post, get_campaign_message_subject
 from exchange_rates import obtener_tasas_de_cambio
 from utils import format_number, format_percentage
 from collections import defaultdict
+import time
+
+def get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback=None):
+    """
+    Extrae información de audiencias usando un cache de nombres precargado.
+    
+    Args:
+        campaign_data (dict): Datos de la campaña.
+        audience_cache (dict): Cache con nombres de audiencias.
+        update_callback (callable, optional): Función para actualizar el estado.
+    
+    Returns:
+        str: Información formateada de las audiencias.
+    """
+    try:
+        audiences = campaign_data['data']['attributes'].get('audiences', {})
+        
+        if not audiences:
+            return "N/A"
+            
+        included = audiences.get('included', [])
+        excluded = audiences.get('excluded', [])
+        
+        result_parts = []
+        
+        if included:
+            # Usar cache para obtener nombres
+            included_names = []
+            for audience_id in included[:2]:  # Mostrar solo los primeros 2
+                name = audience_cache.get(audience_id, f"ID-{audience_id[:8]}")
+                # Truncar nombres muy largos
+                if len(name) > 15:
+                    name = name[:12] + "..."
+                included_names.append(name)
+            
+            if len(included) > 2:
+                included_names.append(f"+{len(included) - 2}")
+            
+            result_parts.append(f"Inc: {', '.join(included_names)}")
+        
+        if excluded:
+            excluded_names = []
+            for audience_id in excluded[:2]:  # Mostrar solo los primeros 2
+                name = audience_cache.get(audience_id, f"ID-{audience_id[:8]}")
+                # Truncar nombres muy largos
+                if len(name) > 15:
+                    name = name[:12] + "..."
+                excluded_names.append(name)
+            
+            if len(excluded) > 2:
+                excluded_names.append(f"+{len(excluded) - 2}")
+            
+            result_parts.append(f"Exc: {', '.join(excluded_names)}")
+        
+        return "; ".join(result_parts) if result_parts else "N/A"
+        
+    except (KeyError, TypeError) as e:
+        if update_callback:
+            update_callback(f"Error al obtener audiencias con cache: {str(e)}")
+        return "N/A"
+
+def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache, temp_data, update_callback=None):
+    """
+    Precarga los detalles de múltiples campañas usando el cache de audiencias.
+    
+    Args:
+        campaign_ids (list): Lista de IDs de campañas.
+        cache (dict): Cache para detalles de campañas.
+        audience_cache (dict): Cache con nombres de audiencias.
+        temp_data (dict): Datos temporales de campañas ya obtenidos.
+        update_callback (callable, optional): Función para actualizar el estado.
+    """
+    count = 0
+    total_campaigns = len(campaign_ids)
+    
+    if update_callback:
+        update_callback(f"Procesando detalles de campañas (0/{total_campaigns})")
+    
+    for campaign_id in campaign_ids:
+        if campaign_id not in cache:
+            count += 1
+            if update_callback:
+                update_callback(f"Procesando detalles de campañas ({count}/{total_campaigns})")
+            
+            try:
+                # Usar datos temporales si están disponibles
+                if campaign_id in temp_data:
+                    campaign_data = temp_data[campaign_id]
+                else:
+                    # Si no están en temp_data, hacer solicitud
+                    url = f"{KLAVIYO_URLS['CAMPAIGN_DETAILS']}{campaign_id}/"
+                    response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                    if response.status_code == 200:
+                        campaign_data = response.json()
+                    elif response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 17))
+                        if update_callback:
+                            update_callback(f"Rate limit - esperando {retry_after}s")
+                        time.sleep(retry_after)
+                        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                        if response.status_code == 200:
+                            campaign_data = response.json()
+                        else:
+                            continue
+                    else:
+                        continue
+                
+                # Procesar datos de la campaña
+                campaign_name = campaign_data['data']['attributes'].get('name', f"Campaign {campaign_id}")
+                send_time = campaign_data['data']['attributes'].get('send_time', 'N/A')
+                
+                if send_time != 'N/A':
+                    send_time = datetime.fromisoformat(send_time.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
+
+                # Obtener subject line, preview text y template_id
+                subject_line, preview_text, template_id = get_campaign_message_subject(campaign_data, update_callback)
+
+                # Obtener audiencias usando el cache
+                audiences_info = get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback)
+
+                result = (campaign_name, send_time, subject_line, preview_text, template_id, audiences_info)
+                cache[campaign_id] = result
+                
+            except Exception as e:
+                if update_callback:
+                    update_callback(f"Error procesando campaña {campaign_id}: {str(e)}")
+                cache[campaign_id] = (f"Campaign {campaign_id}", 'N/A', "No Subject Line", "No Preview Text", None, "N/A")
+    
+    if update_callback:
+        update_callback("Procesamiento de detalles de campañas completado")
 
 def obtener_campanas(list_start_date, list_end_date, update_callback):
     # Obtener el ID de la métrica de conversión
@@ -40,7 +170,118 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
         update_callback("Obteniendo detalles de las campañas...")
     campaign_ids = [result['groupings']['campaign_id'] for result in metrics]
     campaign_details_cache = {}
-    preload_campaign_details(campaign_ids, campaign_details_cache, update_callback)
+    
+    # NUEVA SECCIÓN: Preparar cache de audiencias
+    if update_callback:
+        update_callback("Precargando información de audiencias...")
+    
+    # Obtener todas las audiencias de todas las campañas primero
+    all_audience_ids = []
+    temp_campaign_data = {}
+    
+    # Primera pasada: obtener datos básicos de campañas y extraer IDs de audiencias
+    for i, campaign_id in enumerate(campaign_ids):
+        if update_callback and i % 10 == 0:
+            update_callback(f"Extrayendo audiencias de campañas ({i+1}/{len(campaign_ids)})")
+        
+        try:
+            url = f"{KLAVIYO_URLS['CAMPAIGN_DETAILS']}{campaign_id}/"
+            response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+            if response.status_code == 200:
+                campaign_data = response.json()
+                temp_campaign_data[campaign_id] = campaign_data
+                
+                # Extraer IDs de audiencias
+                audiences = campaign_data['data']['attributes'].get('audiences', {})
+                included = audiences.get('included', [])
+                excluded = audiences.get('excluded', [])
+                all_audience_ids.extend(included + excluded)
+                
+            elif response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', 17))
+                if update_callback:
+                    update_callback(f"Rate limit - esperando {retry_after}s")
+                time.sleep(retry_after)
+                # Reintentar
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                if response.status_code == 200:
+                    campaign_data = response.json()
+                    temp_campaign_data[campaign_id] = campaign_data
+                    audiences = campaign_data['data']['attributes'].get('audiences', {})
+                    included = audiences.get('included', [])
+                    excluded = audiences.get('excluded', [])
+                    all_audience_ids.extend(included + excluded)
+        except Exception as e:
+            if update_callback:
+                update_callback(f"Error obteniendo campaña {campaign_id}: {str(e)}")
+    
+    # Precargar nombres de audiencias únicas
+    unique_audience_ids = list(set(all_audience_ids))
+    audience_names_cache = {}
+    
+    if unique_audience_ids:
+        if update_callback:
+            update_callback(f"Obteniendo nombres de {len(unique_audience_ids)} audiencias únicas...")
+        
+        for i, audience_id in enumerate(unique_audience_ids):
+            if update_callback and i % 5 == 0:
+                update_callback(f"Procesando audiencia {i+1}/{len(unique_audience_ids)}")
+            
+            try:
+                # Intentar como lista primero
+                url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                    audience_names_cache[audience_id] = name
+                    continue
+                elif response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 10))
+                    if update_callback:
+                        update_callback(f"Rate limit en audiencias - esperando {retry_after}s")
+                    time.sleep(retry_after)
+                    response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                    if response.status_code == 200:
+                        data = response.json()
+                        name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                        audience_names_cache[audience_id] = name
+                        continue
+                
+                # Intentar como segmento
+                url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                    audience_names_cache[audience_id] = name
+                elif response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 10))
+                    if update_callback:
+                        update_callback(f"Rate limit en segmentos - esperando {retry_after}s")
+                    time.sleep(retry_after)
+                    response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                    if response.status_code == 200:
+                        data = response.json()
+                        name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                        audience_names_cache[audience_id] = name
+                    else:
+                        audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+                else:
+                    audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+                    
+            except Exception as e:
+                if update_callback:
+                    update_callback(f"Error obteniendo audiencia {audience_id}: {str(e)}")
+                audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+            
+            # Pausa entre solicitudes para evitar rate limiting
+            time.sleep(0.1)
+    
+    # Ahora precargar detalles de campañas usando el cache de audiencias
+    preload_campaign_details_with_audiences(campaign_ids, campaign_details_cache, audience_names_cache, temp_campaign_data, update_callback)
 
     if update_callback:
         update_callback("Procesando datos de campañas, métricas de órdenes completadas y tasas de cambio...")
@@ -52,7 +293,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
     country_codes = set()
     for result in metrics:
         campaign_id = result['groupings']['campaign_id']
-        name, _, _, _, _ = get_campaign_details(campaign_id, campaign_details_cache, update_callback)
+        name, _, _, _, _, _ = campaign_details_cache.get(campaign_id, (f"Campaign {campaign_id}", 'N/A', "No Subject Line", "No Preview Text", None, "N/A"))
         partes = name.split("_")
         country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
         country_codes.add(country_code)
@@ -107,7 +348,11 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
 
     for result in metrics:
         campaign_id = result['groupings']['campaign_id']
-        name, send_time, subject, preview, template_id = get_campaign_details(campaign_id, campaign_details_cache, update_callback)
+        name, send_time, subject, preview, template_id, audiences_info = campaign_details_cache.get(
+            campaign_id, 
+            (f"Campaign {campaign_id}", 'N/A', "No Subject Line", "No Preview Text", None, "N/A")
+        )
+   
         open_rate = round(result['statistics']['open_rate'] * 100, 2)
         click_rate = round(result['statistics']['click_rate'] * 100, 2)
         delivered = int(result['statistics']['delivered'])
@@ -144,12 +389,13 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
                     'delivered': delivered,
                     'subject_line': subject,
                     'preview_text': preview,
-                    'template_id': template_id,  # Nuevo campo
-                    'order_unique': order_metrics["unique"],  # Órdenes únicas
-                    'order_sum_value': usd_value,  # Valor total de órdenes en USD
-                    'order_sum_value_local': local_value,  # Valor en moneda local
-                    'order_count': order_metrics["count"],  # Cantidad total de órdenes
-                    'per_recipient': per_recipient,  # Total Value (USD) / Recibidos
+                    'template_id': template_id,
+                    'audiences': audiences_info,  # Nueva columna con nombres
+                    'order_unique': order_metrics["unique"],
+                    'order_sum_value': usd_value,
+                    'order_sum_value_local': local_value,
+                    'order_count': order_metrics["count"],
+                    'per_recipient': per_recipient,
                 })
                 if update_callback:
                     update_callback(f"Campaña filtrada: ID: {campaign_id}, Nombre: {name}, Send Time: {send_time}, Open Rate: {open_rate}%, Click Rate: {click_rate}%, Delivered: {delivered}, Unique Orders: {order_metrics['unique']}, Total Value (USD): {usd_value:.2f}, Total Value (Local): {local_value:.2f} {CURRENCY_SYMBOLS.get(currency, '$')}, Order Count: {order_metrics['count']}, Per Recipient: {per_recipient:.2f}")
@@ -166,15 +412,16 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
     campaigns_list = [
         (idx, camp['campaign_id'], camp['campaign_name'], camp['send_time'], camp['open_rate'], camp['click_rate'], 
          camp['delivered'], camp['subject_line'], camp['preview_text'], camp['template_id'],  # Agregar template_id
-         camp['order_unique'], camp['order_sum_value'], camp['order_sum_value_local'], camp['order_count'], camp['per_recipient'])
+         camp['audiences'], camp['order_unique'], camp['order_sum_value'], camp['order_sum_value_local'], camp['order_count'], camp['per_recipient'])
         for idx, camp in enumerate(filtered_campaigns, start=1)
     ]
+    
     return campaigns_list, None
 
 def agrupar_por_pais(campanas):
     grupos = defaultdict(list)
     for camp in campanas:
-        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
         partes = name.split("_")
         pais = partes[-1].strip().lower() if len(partes) > 1 else "desconocido"
         grupos[pais].append(camp)
@@ -183,11 +430,11 @@ def agrupar_por_pais(campanas):
 def agrupar_por_fecha(campanas):
     grupos = defaultdict(list)
     for camp in campanas:
-        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
         try:
             date_only = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
         except ValueError:
-            date_only = send_time  # Mantener el valor original si no se puede parsear
+            date_only = send_time
         grupos[date_only].append(camp)
     return grupos
 
@@ -195,27 +442,29 @@ def agrupar_por_fecha_y_prefijo(campanas):
     """Agrupa campañas por fecha, y dentro de cada fecha, por prefijo (ecom, cross, etc)."""
     grupos = defaultdict(lambda: defaultdict(list))
     for camp in campanas:
-        _, _, name, send_time, *_ = camp
+        _, _, name, send_time, *_ = camp  # Usar *_ para manejar cualquier número de campos adicionales
         try:
             fecha = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
         except ValueError:
-            fecha = send_time  # fallback si send_time no tiene formato esperado
+            fecha = send_time
 
         prefijo = name.split("_")[0].lower() if "_" in name else "otro"
         grupos[fecha][prefijo].append(camp)
     return grupos
 
-
 def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value=True, template_ids_dict=None):
     tree.delete(*tree.get_children())
 
+    # Añadir la nueva columna "Audiences"
     columns = ("Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-               "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview")
+               "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Audiences", "Subject", "Preview")
     tree["columns"] = columns
+    
     for col, text in zip(columns, ("#", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", "Unique Orders",
-                                   "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Subject Line", "Preview Text")):
+                                   "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Audiencias", "Subject Line", "Preview Text")):
         tree.heading(col, text=text)
 
+    # Configurar anchos de columnas (ajustar según necesidad)
     tree.column("Numero", width=50, anchor="center")
     tree.column("Nombre", width=120)
     tree.column("FechaEnvio", width=100)
@@ -227,11 +476,12 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
     tree.column("OrderSumValueLocal", width=120 if show_local_value else 0, anchor="e", stretch=show_local_value)
     tree.column("PerRecipient", width=120, anchor="e")
     tree.column("OrderCount", width=80, anchor="center")
+    tree.column("Audiences", width=150)  # Nueva columna
     tree.column("Subject", width=150)
     tree.column("Preview", width=150)
 
     def add_campaign_row(camp, show_local_value=True):
-        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
         partes = name.split("_")
         country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
         currency = COUNTRY_TO_CURRENCY.get(country_code, "USD")
@@ -254,6 +504,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         values.append(format_number(per_recipient, is_currency=True))
         values.extend([
             format_number(int(order_count)),
+            audiences,  # Nueva columna de audiencias con nombres
             subject,
             preview,
         ])
@@ -272,7 +523,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         total_delivered_for_weight = 0
 
         for camp in camps:
-            _, _, _, _, open_rate, click_rate, delivered, _, _, _, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+            _, _, _, _, open_rate, click_rate, delivered, _, _, _, _, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
             total_delivered += delivered
             weighted_open += (open_rate * delivered) / 100
             weighted_click += (click_rate * delivered) / 100
@@ -305,6 +556,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             values.append(format_number(per_recipient_weighted_avg, is_currency=True))
             values.extend([
                 format_number(int(total_count)),
+                "",
                 "",
                 "",
             ])
@@ -340,7 +592,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             if subtotal_values:
                 tree.insert("", "end", values=subtotal_values, tags=("bold",))
                 all_subtotals.append(subtotal_data)
-            tree.insert("", "end", values=("",) * 13)
+            tree.insert("", "end", values=("",) * 14)  # Cambiado de 13 a 14 para incluir la nueva columna
     else:
         grupos_fecha = defaultdict(lambda: defaultdict(list))
         for camp in campanas:
@@ -370,7 +622,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
                 if subtotal_values:
                     tree.insert("", "end", values=subtotal_values, tags=("bold",))
                     all_subtotals.append(subtotal_data)
-                tree.insert("", "end", values=("",) * 13)
+                tree.insert("", "end", values=("",) * 14)  # Cambiado de 13 a 14 para incluir la nueva columna
 
     return all_subtotals
 
@@ -384,7 +636,7 @@ def seleccionar_campanas(campanas, input_str):
     for token in tokens:
         if len(token) == 2 and token in ALLOWED_CODES:
             for camp in campanas:
-                idx, cid, name, send_time, _, _, _, _, _, _, _, _, _, _, _ = camp
+                idx, cid, name, send_time, *_ = camp  # Usar *_ para manejar campos adicionales
                 partes = name.split("_")
                 if len(partes) > 1 and partes[-1].strip().lower() == token:
                     key = (cid, send_time)
@@ -393,7 +645,7 @@ def seleccionar_campanas(campanas, input_str):
                         seleccionados.append(camp)
         elif not token.isdigit():
             for camp in campanas:
-                idx, cid, name, send_time, _, _, _, _, _, _, _, _, _, _, _ = camp
+                idx, cid, name, send_time, *_ = camp  # Usar *_ para manejar campos adicionales
                 partes = name.split("_")
                 if partes and token in partes[0].lower():
                     key = (cid, send_time)
@@ -404,7 +656,7 @@ def seleccionar_campanas(campanas, input_str):
     for idx in indices:
         if 0 <= idx < len(campanas):
             camp = campanas[idx]
-            idx, cid, name, send_time, _, _, _, _, _, _, _, _, _, _, _ = camp
+            idx, cid, name, send_time, *_ = camp  # Usar *_ para manejar campos adicionales
             key = (cid, send_time)
             if key not in vistos:
                 vistos.add(key)

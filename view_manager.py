@@ -16,10 +16,10 @@ class ViewManager:
         self.resultados_tabla = None  # Para acceder a resultados_tabla
 
     def create_campanas_tabla(self, treeview_frame, total_table_width):
-        """Crea y configura la tabla de campañas (campanas_tabla)."""
+    
         self.campanas_tabla = ttk.Treeview(treeview_frame, columns=(
             "Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview"
+            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Audiences", "Subject", "Preview"
         ), show="headings")
         self.campanas_tabla.grid(row=0, column=0, sticky="nsew")
 
@@ -44,28 +44,32 @@ class ViewManager:
         self.campanas_tabla.heading("OrderSumValueLocal", text="Total Value (Local)")
         self.campanas_tabla.heading("PerRecipient", text="Per Recipient")
         self.campanas_tabla.heading("OrderCount", text="Order Count")
+        self.campanas_tabla.heading("Audiences", text="Audiencias")  # Nueva columna
         self.campanas_tabla.heading("Subject", text="Subject Line")
         self.campanas_tabla.heading("Preview", text="Preview Text")
+        
 
         # Configurar anchos de columnas
         column_widths = {
-            "Numero": int(total_table_width * 0.03),
-            "Nombre": int(total_table_width * 0.08),
-            "FechaEnvio": int(total_table_width * 0.06),
-            "OpenRate": int(total_table_width * 0.05),
-            "ClickRate": int(total_table_width * 0.05),
-            "Recibios": int(total_table_width * 0.06),
-            "OrderUnique": int(total_table_width * 0.05),
-            "OrderSumValue": int(total_table_width * 0.08),
-            "OrderSumValueLocal": int(total_table_width * 0.08),
-            "PerRecipient": int(total_table_width * 0.08),
-            "OrderCount": int(total_table_width * 0.05),
-            "Subject": int(total_table_width * 0.12),
-            "Preview": int(total_table_width * 0.12),
-        }
+        "Numero": int(total_table_width * 0.025),      # Reducido de 0.03
+        "Nombre": int(total_table_width * 0.07),       # Reducido de 0.08
+        "FechaEnvio": int(total_table_width * 0.05),   # Reducido de 0.06
+        "OpenRate": int(total_table_width * 0.04),     # Reducido de 0.05
+        "ClickRate": int(total_table_width * 0.04),    # Reducido de 0.05
+        "Recibios": int(total_table_width * 0.05),     # Reducido de 0.06
+        "OrderUnique": int(total_table_width * 0.04),  # Reducido de 0.05
+        "OrderSumValue": int(total_table_width * 0.07), # Reducido de 0.08
+        "OrderSumValueLocal": int(total_table_width * 0.07), # Reducido de 0.08
+        "PerRecipient": int(total_table_width * 0.07), # Reducido de 0.08
+        "OrderCount": int(total_table_width * 0.04),   # Reducido de 0.05
+        "Audiences": int(total_table_width * 0.12),    # Nueva columna
+        "Subject": int(total_table_width * 0.10),      # Reducido de 0.12
+        "Preview": int(total_table_width * 0.10),      # Reducido de 0.12
+    }
 
         self.column_widths = column_widths
 
+        # Aplicar configuraciones de columnas
         self.campanas_tabla.column("Numero", width=column_widths["Numero"], anchor="center")
         self.campanas_tabla.column("Nombre", width=column_widths["Nombre"])
         self.campanas_tabla.column("FechaEnvio", width=column_widths["FechaEnvio"])
@@ -77,6 +81,7 @@ class ViewManager:
         self.campanas_tabla.column("OrderSumValueLocal", width=column_widths["OrderSumValueLocal"], anchor="e")
         self.campanas_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
         self.campanas_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
+        self.campanas_tabla.column("Audiences", width=column_widths["Audiences"])  # Nueva columna
         self.campanas_tabla.column("Subject", width=column_widths["Subject"])
         self.campanas_tabla.column("Preview", width=column_widths["Preview"])
 
@@ -152,7 +157,7 @@ class ViewManager:
         """Crea y configura la tabla de total general (grand_total_tabla)."""
         self.grand_total_tabla = ttk.Treeview(parent_frame, columns=(
             "Numero", "Nombre", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "PerRecipient", "OrderCount"
+            "OrderSumValue", "PerRecipient", "OrderCount", "Audiences"  # Añadida nueva columna
         ), show="headings", height=1)
         self.grand_total_tabla.grid(row=3, column=0, sticky="ew", pady=5)
 
@@ -165,6 +170,7 @@ class ViewManager:
         self.grand_total_tabla.heading("OrderSumValue", text="Total Value (USD)")
         self.grand_total_tabla.heading("PerRecipient", text="Per Recipient")
         self.grand_total_tabla.heading("OrderCount", text="Order Count")
+        self.grand_total_tabla.heading("Audiences", text="Audiencias")
 
         self.grand_total_tabla.column("Numero", width=column_widths["Numero"], anchor="center")
         self.grand_total_tabla.column("Nombre", width=column_widths["Nombre"])
@@ -175,6 +181,7 @@ class ViewManager:
         self.grand_total_tabla.column("OrderSumValue", width=column_widths["OrderSumValue"], anchor="e")
         self.grand_total_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
         self.grand_total_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
+        self.grand_total_tabla.column("Audiences", width=column_widths["Audiences"])
 
         self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), background="#23376D", foreground="white")
 
