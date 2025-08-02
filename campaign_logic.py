@@ -12,6 +12,7 @@ import time
 def get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback=None):
     """
     Extrae información de audiencias usando un cache de nombres precargado.
+    MODIFICADO: Sin truncamiento para usar con sistema dropdown.
     
     Args:
         campaign_data (dict): Datos de la campaña.
@@ -33,13 +34,11 @@ def get_campaign_audiences_with_cache(campaign_data, audience_cache, update_call
         result_parts = []
         
         if included:
-            # Usar cache para obtener nombres
+            # Usar cache para obtener nombres - SIN TRUNCAR
             included_names = []
-            for audience_id in included[:2]:  # Mostrar solo los primeros 2
+            for audience_id in included[:2]:  # Mostrar solo los primeros 2 para el resumen
                 name = audience_cache.get(audience_id, f"ID-{audience_id[:8]}")
-                # Truncar nombres muy largos
-                if len(name) > 15:
-                    name = name[:12] + "..."
+                # ELIMINAR EL TRUNCAMIENTO - mostrar nombre completo
                 included_names.append(name)
             
             if len(included) > 2:
@@ -49,11 +48,9 @@ def get_campaign_audiences_with_cache(campaign_data, audience_cache, update_call
         
         if excluded:
             excluded_names = []
-            for audience_id in excluded[:2]:  # Mostrar solo los primeros 2
+            for audience_id in excluded[:2]:  # Mostrar solo los primeros 2 para el resumen
                 name = audience_cache.get(audience_id, f"ID-{audience_id[:8]}")
-                # Truncar nombres muy largos
-                if len(name) > 15:
-                    name = name[:12] + "..."
+                # ELIMINAR EL TRUNCAMIENTO - mostrar nombre completo
                 excluded_names.append(name)
             
             if len(excluded) > 2:
@@ -67,17 +64,35 @@ def get_campaign_audiences_with_cache(campaign_data, audience_cache, update_call
         if update_callback:
             update_callback(f"Error al obtener audiencias con cache: {str(e)}")
         return "N/A"
+    
+def extract_full_audience_data(campaign_data, audience_cache):
+    """Extrae los datos completos de audiencias con nombres completos."""
+    try:
+        audiences = campaign_data['data']['attributes'].get('audiences', {})
+        
+        if not audiences:
+            return None
+            
+        included = audiences.get('included', [])
+        excluded = audiences.get('excluded', [])
+        
+        result = {}
+        
+        if included:
+            result['included'] = [audience_cache.get(aud_id, f"ID-{aud_id[:8]}") for aud_id in included]
+        
+        if excluded:
+            result['excluded'] = [audience_cache.get(aud_id, f"ID-{aud_id[:8]}") for aud_id in excluded]
+        
+        return result if result else None
+        
+    except (KeyError, TypeError):
+        return None    
 
-def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache, temp_data, update_callback=None):
+def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache, temp_data, update_callback=None, view_manager=None):
     """
     Precarga los detalles de múltiples campañas usando el cache de audiencias.
-    
-    Args:
-        campaign_ids (list): Lista de IDs de campañas.
-        cache (dict): Cache para detalles de campañas.
-        audience_cache (dict): Cache con nombres de audiencias.
-        temp_data (dict): Datos temporales de campañas ya obtenidos.
-        update_callback (callable, optional): Función para actualizar el estado.
+    MODIFICADO para almacenar datos completos en view_manager.
     """
     count = 0
     total_campaigns = len(campaign_ids)
@@ -127,6 +142,13 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
                 # Obtener audiencias usando el cache
                 audiences_info = get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback)
 
+                # NUEVO: Extraer audiencias completas para el view_manager
+                if view_manager:
+                    full_audiences = extract_full_audience_data(campaign_data, audience_cache)
+                    # Almacenar usando el campaign_id como clave temporal
+                    if full_audiences:
+                        view_manager.audience_data[f"temp_{campaign_id}"] = full_audiences
+
                 result = (campaign_name, send_time, subject_line, preview_text, template_id, audiences_info)
                 cache[campaign_id] = result
                 
@@ -138,7 +160,18 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
     if update_callback:
         update_callback("Procesamiento de detalles de campañas completado")
 
-def obtener_campanas(list_start_date, list_end_date, update_callback):
+
+def obtener_campanas(list_start_date, list_end_date, update_callback, view_manager=None, include_audience_sizes=False):
+    """
+    Función modificada para aceptar view_manager y opcionalmente incluir tamaños de audiencias.
+    
+    Args:
+        list_start_date (str): Fecha de inicio
+        list_end_date (str): Fecha de fin  
+        update_callback (callable): Función para actualizar UI
+        view_manager: Manager de vistas para datos de audiencias
+        include_audience_sizes (bool): Si True, obtiene los tamaños de audiencias (MÁS LENTO)
+    """
     # Obtener el ID de la métrica de conversión
     conversion_metric_id = None
     try:
@@ -215,20 +248,24 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
             if update_callback:
                 update_callback(f"Error obteniendo campaña {campaign_id}: {str(e)}")
     
-    # Precargar nombres de audiencias únicas
+    # Precargar nombres de audiencias únicas CON/SIN TAMAÑOS según el parámetro
     unique_audience_ids = list(set(all_audience_ids))
     audience_names_cache = {}
     
     if unique_audience_ids:
-        if update_callback:
-            update_callback(f"Obteniendo nombres de {len(unique_audience_ids)} audiencias únicas...")
+        if include_audience_sizes:
+            if update_callback:
+                update_callback(f"Obteniendo nombres y tamaños de {len(unique_audience_ids)} audiencias únicas (esto puede tomar varios minutos)...")
+        else:
+            if update_callback:
+                update_callback(f"Obteniendo nombres de {len(unique_audience_ids)} audiencias únicas...")
         
         for i, audience_id in enumerate(unique_audience_ids):
             if update_callback and i % 5 == 0:
                 update_callback(f"Procesando audiencia {i+1}/{len(unique_audience_ids)}")
             
             try:
-                # Intentar como lista primero
+                # Intentar como lista primero (SIN additional-fields)
                 url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
                 response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
                 
@@ -237,41 +274,55 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
                     name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
                     audience_names_cache[audience_id] = name
                     continue
-                elif response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 10))
-                    if update_callback:
-                        update_callback(f"Rate limit en audiencias - esperando {retry_after}s")
-                    time.sleep(retry_after)
+                    
+                    
+                        
+                else:
+                    # VERSIÓN RÁPIDA SIN TAMAÑOS (CÓDIGO ORIGINAL)
+                    # Intentar como lista primero
+                    url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                    
                     if response.status_code == 200:
                         data = response.json()
                         name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
                         audience_names_cache[audience_id] = name
                         continue
-                
-                # Intentar como segmento
-                url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
-                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
-                    audience_names_cache[audience_id] = name
-                elif response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 10))
-                    if update_callback:
-                        update_callback(f"Rate limit en segmentos - esperando {retry_after}s")
-                    time.sleep(retry_after)
+                    elif response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 10))
+                        if update_callback:
+                            update_callback(f"Rate limit en audiencias - esperando {retry_after}s")
+                        time.sleep(retry_after)
+                        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                        if response.status_code == 200:
+                            data = response.json()
+                            name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
+                            audience_names_cache[audience_id] = name
+                            continue
+                    
+                    # Intentar como segmento
+                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                    
                     if response.status_code == 200:
                         data = response.json()
                         name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
                         audience_names_cache[audience_id] = name
+                    elif response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 10))
+                        if update_callback:
+                            update_callback(f"Rate limit en segmentos - esperando {retry_after}s")
+                        time.sleep(retry_after)
+                        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                        if response.status_code == 200:
+                            data = response.json()
+                            name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                            audience_names_cache[audience_id] = name
+                        else:
+                            audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
                     else:
                         audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
-                else:
-                    audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
-                    
+                        
             except Exception as e:
                 if update_callback:
                     update_callback(f"Error obteniendo audiencia {audience_id}: {str(e)}")
@@ -281,7 +332,14 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
             time.sleep(0.1)
     
     # Ahora precargar detalles de campañas usando el cache de audiencias
-    preload_campaign_details_with_audiences(campaign_ids, campaign_details_cache, audience_names_cache, temp_campaign_data, update_callback)
+    preload_campaign_details_with_audiences(
+        campaign_ids, 
+        campaign_details_cache, 
+        audience_names_cache, 
+        temp_campaign_data, 
+        update_callback,
+        view_manager  # PASAR VIEW_MANAGER
+    )
 
     if update_callback:
         update_callback("Procesando datos de campañas, métricas de órdenes completadas y tasas de cambio...")
@@ -411,7 +469,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback):
     # Formatear las campañas para la salida esperada
     campaigns_list = [
         (idx, camp['campaign_id'], camp['campaign_name'], camp['send_time'], camp['open_rate'], camp['click_rate'], 
-         camp['delivered'], camp['subject_line'], camp['preview_text'], camp['template_id'],  # Agregar template_id
+         camp['delivered'], camp['subject_line'], camp['preview_text'], camp['template_id'],
          camp['audiences'], camp['order_unique'], camp['order_sum_value'], camp['order_sum_value_local'], camp['order_count'], camp['per_recipient'])
         for idx, camp in enumerate(filtered_campaigns, start=1)
     ]
@@ -452,20 +510,69 @@ def agrupar_por_fecha_y_prefijo(campanas):
         grupos[fecha][prefijo].append(camp)
     return grupos
 
-def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value=True, template_ids_dict=None):
+def add_campaign_row(camp, show_local_value=True, view_manager=None):
+    """Función auxiliar para crear una fila de campaña con indicadores de expansión."""
+    idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+    
+    partes = name.split("_")
+    country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
+    currency = COUNTRY_TO_CURRENCY.get(country_code, "USD")
+    currency_symbol = CURRENCY_SYMBOLS.get(currency, "$")
+
+    # MODIFICAR LA PRIMERA COLUMNA PARA INCLUIR INDICADOR DE EXPANSIÓN
+    if audiences != "N/A" and audiences:
+        numero_display = f"▶ {idx}"  # Mostrar indicador si hay audiencias
+    else:
+        numero_display = str(idx)  # Sin indicador si no hay audiencias
+
+    values = [
+        numero_display,  # Primera columna modificada
+        name,
+        send_time,
+        format_percentage(open_rate),
+        format_percentage(click_rate),
+        format_number(delivered),
+        format_number(int(order_unique)),
+        format_number(order_sum_value, is_currency=True),
+    ]
+    
+    if show_local_value:
+        values.append(format_number(order_sum_value_local, is_currency=True, currency_symbol=currency_symbol))
+    else:
+        values.append("")
+    
+    values.extend([
+        format_number(per_recipient, is_currency=True),
+        format_number(int(order_count)),
+        # ELIMINAR LA COLUMNA DE AUDIENCIAS - solo Subject y Preview
+        subject,
+        preview,
+    ])
+    
+    return values, audiences
+
+
+def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value=True, template_ids_dict=None, view_manager=None):
+    """Función principal modificada para usar el view_manager."""
     tree.delete(*tree.get_children())
 
-    # Añadir la nueva columna "Audiences"
+    # ELIMINAR LA COLUMNA "Audiences" DE LA DEFINICIÓN
     columns = ("Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-               "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Audiences", "Subject", "Preview")
+               "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview")
     tree["columns"] = columns
-    
-    for col, text in zip(columns, ("#", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", "Unique Orders",
-                                   "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Audiencias", "Subject Line", "Preview Text")):
+
+    # Limpiar los datos de audiencias anteriores si hay view_manager
+    if view_manager:
+        view_manager.audience_data.clear()
+        view_manager.expanded_rows.clear()
+
+    # CONFIGURAR ENCABEZADOS SIN COLUMNA AUDIENCES
+    for col, text in zip(columns, ("# / Audiencias", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", "Unique Orders",
+                                   "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Subject Line", "Preview Text")):
         tree.heading(col, text=text)
 
-    # Configurar anchos de columnas (ajustar según necesidad)
-    tree.column("Numero", width=50, anchor="center")
+    # Configurar anchos de columnas (SIN la columna Audiences)
+    tree.column("Numero", width=80, anchor="center")  # Aumentado para mostrar "▶ #"
     tree.column("Nombre", width=120)
     tree.column("FechaEnvio", width=100)
     tree.column("OpenRate", width=80, anchor="center")
@@ -476,39 +583,27 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
     tree.column("OrderSumValueLocal", width=120 if show_local_value else 0, anchor="e", stretch=show_local_value)
     tree.column("PerRecipient", width=120, anchor="e")
     tree.column("OrderCount", width=80, anchor="center")
-    tree.column("Audiences", width=150)  # Nueva columna
-    tree.column("Subject", width=150)
-    tree.column("Preview", width=150)
+    tree.column("Subject", width=200)  # Aumentado al eliminar audiencias
+    tree.column("Preview", width=200)  # Aumentado al eliminar audiencias
 
-    def add_campaign_row(camp, show_local_value=True):
-        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
-        partes = name.split("_")
-        country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
-        currency = COUNTRY_TO_CURRENCY.get(country_code, "USD")
-        currency_symbol = CURRENCY_SYMBOLS.get(currency, "$")
-
-        values = [
-            idx,
-            name,
-            send_time,
-            format_percentage(open_rate),
-            format_percentage(click_rate),
-            format_number(delivered),
-            format_number(int(order_unique)),
-            format_number(order_sum_value, is_currency=True),
-        ]
-        if show_local_value:
-            values.append(format_number(order_sum_value_local, is_currency=True, currency_symbol=currency_symbol))
-        else:
-            values.append("")
-        values.append(format_number(per_recipient, is_currency=True))
-        values.extend([
-            format_number(int(order_count)),
-            audiences,  # Nueva columna de audiencias con nombres
-            subject,
-            preview,
-        ])
-        return values
+    def process_campaign_for_table(camp, show_local_value=True):
+        """Procesa una campaña para mostrarla en la tabla."""
+        values, audiences = add_campaign_row(camp, show_local_value, view_manager)
+        idx = camp[0]
+        campaign_id = camp[1]
+        template_id = camp[9]
+        
+        item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}", "campaign_row"))
+        
+        # Almacenar template_id si se proporciona el diccionario
+        if template_ids_dict is not None and template_id is not None:
+            template_ids_dict[item_id] = template_id
+        
+        # ALMACENAR DATOS DE AUDIENCIAS EN VIEW_MANAGER
+        if view_manager and audiences != "N/A":
+            view_manager.store_audience_data(item_id, audiences)
+        
+        return item_id
 
     def calculate_subtotals(camps, show_local_value=True):
         total_delivered = 0
@@ -556,9 +651,8 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             values.append(format_number(per_recipient_weighted_avg, is_currency=True))
             values.extend([
                 format_number(int(total_count)),
-                "",
-                "",
-                "",
+                "",  # Subject
+                "",  # Preview
             ])
             return values, {
                 "delivered": total_delivered,
@@ -580,19 +674,13 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         for pais in sorted(grupos.keys()):
             tree.insert("", "end", values=(f"{pais.upper()}", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
             for camp in sorted(grupos[pais], key=lambda x: x[0]):
-                values = add_campaign_row(camp, show_local_value)
-                idx = camp[0]
-                campaign_id = camp[1]
-                template_id = camp[9]
-                item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
-                if template_ids_dict is not None and template_id is not None:
-                    template_ids_dict[item_id] = template_id
+                process_campaign_for_table(camp, show_local_value)
 
             subtotal_values, subtotal_data = calculate_subtotals(grupos[pais], show_local_value)
             if subtotal_values:
                 tree.insert("", "end", values=subtotal_values, tags=("bold",))
                 all_subtotals.append(subtotal_data)
-            tree.insert("", "end", values=("",) * 14)  # Cambiado de 13 a 14 para incluir la nueva columna
+            tree.insert("", "end", values=("",) * 13)  # 13 columnas (sin Audiences)
     else:
         grupos_fecha = defaultdict(lambda: defaultdict(list))
         for camp in campanas:
@@ -610,19 +698,13 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
                 tree.insert("", "end", values=(prefijo, "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
 
                 for camp in sorted(grupos_fecha[fecha][prefijo], key=lambda x: x[0]):
-                    values = add_campaign_row(camp, show_local_value=False)
-                    idx = camp[0]
-                    campaign_id = camp[1]
-                    template_id = camp[9]
-                    item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}",))
-                    if template_ids_dict is not None and template_id is not None:
-                        template_ids_dict[item_id] = template_id
+                    process_campaign_for_table(camp, show_local_value=False)
 
                 subtotal_values, subtotal_data = calculate_subtotals(grupos_fecha[fecha][prefijo], show_local_value=False)
                 if subtotal_values:
                     tree.insert("", "end", values=subtotal_values, tags=("bold",))
                     all_subtotals.append(subtotal_data)
-                tree.insert("", "end", values=("",) * 14)  # Cambiado de 13 a 14 para incluir la nueva columna
+                tree.insert("", "end", values=("",) * 13)  # 13 columnas (sin Audiences)
 
     return all_subtotals
 

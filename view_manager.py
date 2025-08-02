@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+import tkinter.messagebox
 
 class ViewManager:
     def __init__(self, main_frame, screen_width, screen_height, email_preview, exporter):
@@ -12,18 +13,22 @@ class ViewManager:
         self.grand_total_tabla = None
         self.column_widths = None
         self.left_frame = None
-        self.filter_var = tk.StringVar(value="Todos")  # Variable para el filtro, por defecto "Todos"
-        self.resultados_tabla = None  # Para acceder a resultados_tabla
+        self.filter_var = tk.StringVar(value="Todos")
+        self.resultados_tabla = None
+        
+        # NUEVAS VARIABLES PARA EL SISTEMA DROPDOWN
+        self.expanded_rows = {}  # Almacena el estado de expansión de cada fila
+        self.audience_data = {}  # Almacena los datos completos de audiencias
 
     def create_campanas_tabla(self, treeview_frame, total_table_width):
-    
+        # Crear la tabla SIN la columna "Audiences"
         self.campanas_tabla = ttk.Treeview(treeview_frame, columns=(
             "Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Audiences", "Subject", "Preview"
+            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview"
         ), show="headings")
         self.campanas_tabla.grid(row=0, column=0, sticky="nsew")
 
-        # Añadir scrollbar vertical
+        # Configurar scrollbar vertical
         scrollbar = ttk.Scrollbar(treeview_frame, orient="vertical", command=self.campanas_tabla.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.campanas_tabla.configure(yscrollcommand=scrollbar.set)
@@ -33,7 +38,8 @@ class ViewManager:
         style.configure("Treeview", font=("Arial", 10), rowheight=30)
         style.configure("Treeview.Heading", font=("Arial", 11, "bold"))
 
-        self.campanas_tabla.heading("Numero", text="#")
+        # CAMBIAR EL TÍTULO DE LA PRIMERA COLUMNA PARA INDICAR FUNCIONALIDAD
+        self.campanas_tabla.heading("Numero", text="# / Audiencias")
         self.campanas_tabla.heading("Nombre", text="Nombre")
         self.campanas_tabla.heading("FechaEnvio", text="Fecha de Envío")
         self.campanas_tabla.heading("OpenRate", text="Open Rate")
@@ -44,28 +50,25 @@ class ViewManager:
         self.campanas_tabla.heading("OrderSumValueLocal", text="Total Value (Local)")
         self.campanas_tabla.heading("PerRecipient", text="Per Recipient")
         self.campanas_tabla.heading("OrderCount", text="Order Count")
-        self.campanas_tabla.heading("Audiences", text="Audiencias")  # Nueva columna
         self.campanas_tabla.heading("Subject", text="Subject Line")
         self.campanas_tabla.heading("Preview", text="Preview Text")
-        
 
-        # Configurar anchos de columnas
+        # Configurar anchos de columnas (ELIMINAR LA COLUMNA AUDIENCES)
         column_widths = {
-        "Numero": int(total_table_width * 0.025),      # Reducido de 0.03
-        "Nombre": int(total_table_width * 0.07),       # Reducido de 0.08
-        "FechaEnvio": int(total_table_width * 0.05),   # Reducido de 0.06
-        "OpenRate": int(total_table_width * 0.04),     # Reducido de 0.05
-        "ClickRate": int(total_table_width * 0.04),    # Reducido de 0.05
-        "Recibios": int(total_table_width * 0.05),     # Reducido de 0.06
-        "OrderUnique": int(total_table_width * 0.04),  # Reducido de 0.05
-        "OrderSumValue": int(total_table_width * 0.07), # Reducido de 0.08
-        "OrderSumValueLocal": int(total_table_width * 0.07), # Reducido de 0.08
-        "PerRecipient": int(total_table_width * 0.07), # Reducido de 0.08
-        "OrderCount": int(total_table_width * 0.04),   # Reducido de 0.05
-        "Audiences": int(total_table_width * 0.12),    # Nueva columna
-        "Subject": int(total_table_width * 0.10),      # Reducido de 0.12
-        "Preview": int(total_table_width * 0.10),      # Reducido de 0.12
-    }
+            "Numero": int(total_table_width * 0.06),       # Aumentado para mostrar indicador
+            "Nombre": int(total_table_width * 0.09),       
+            "FechaEnvio": int(total_table_width * 0.06),   
+            "OpenRate": int(total_table_width * 0.05),     
+            "ClickRate": int(total_table_width * 0.05),    
+            "Recibios": int(total_table_width * 0.06),     
+            "OrderUnique": int(total_table_width * 0.05),  
+            "OrderSumValue": int(total_table_width * 0.08), 
+            "OrderSumValueLocal": int(total_table_width * 0.08), 
+            "PerRecipient": int(total_table_width * 0.08), 
+            "OrderCount": int(total_table_width * 0.05),   
+            "Subject": int(total_table_width * 0.14),      # Aumentado al quitar audiencias
+            "Preview": int(total_table_width * 0.15),      # Aumentado al quitar audiencias
+        }
 
         self.column_widths = column_widths
 
@@ -81,19 +84,287 @@ class ViewManager:
         self.campanas_tabla.column("OrderSumValueLocal", width=column_widths["OrderSumValueLocal"], anchor="e")
         self.campanas_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
         self.campanas_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
-        self.campanas_tabla.column("Audiences", width=column_widths["Audiences"])  # Nueva columna
         self.campanas_tabla.column("Subject", width=column_widths["Subject"])
         self.campanas_tabla.column("Preview", width=column_widths["Preview"])
 
+        # Configurar estilos para las filas de audiencias
         self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
-        self.campanas_tabla.bind("<Double-1>", self.email_preview.preview_template)
+        self.campanas_tabla.tag_configure("campaign_row", font=("Arial", 10))
+        self.campanas_tabla.tag_configure("audience_detail", font=("Arial", 9), background="#F5F5F5")
+        self.campanas_tabla.tag_configure("audience_header", font=("Arial", 9, "bold"), background="#E6F3FF")
 
-        # Configurar el binding para el clic derecho en la tabla
-        self.campanas_tabla.bind("<Button-3>", self.show_context_menu)
+        # NUEVOS BINDINGS PARA MANEJAR CLICS
+        self.campanas_tabla.bind("<Button-1>", self.on_single_click)  # Clic simple
+        self.campanas_tabla.bind("<Double-1>", self.on_double_click)  # Doble clic
+        self.campanas_tabla.bind("<Button-3>", self.show_context_menu)  # Clic derecho
 
-        # Actualizar referencias
-        self.email_preview.campanas_tabla = self.campanas_tabla
-        self.exporter.campanas_tabla = self.campanas_tabla
+    # NUEVOS MÉTODOS PARA MANEJAR LA EXPANSIÓN/CONTRACCIÓN
+    def on_single_click(self, event):
+        """Maneja el clic simple para expandir/contraer audiencias solo en la primera columna."""
+        # Identificar qué columna fue clickeada
+        column = self.campanas_tabla.identify_column(event.x)
+        if column == "#1":  # Solo en la primera columna (Numero)
+            item = self.campanas_tabla.identify_row(event.y)
+            if item:
+                # Verificar si es una fila de campaña (no de grupo o subtotal)
+                tags = self.campanas_tabla.item(item, "tags")
+                if any(tag.startswith("campaign_") for tag in tags):
+                    self.toggle_audience_details(item)
+
+    def on_double_click(self, event):
+        """Maneja el doble clic para preview del template (funcionalidad original)."""
+        # Solo activar preview si NO es en la primera columna
+        column = self.campanas_tabla.identify_column(event.x)
+        if column != "#1":
+            self.email_preview.preview_template(event)
+
+    def toggle_audience_details(self, item_id):
+        """Alterna entre expandir y contraer los detalles de audiencias."""
+        if item_id in self.expanded_rows and self.expanded_rows[item_id]:
+            self.contract_audience_details(item_id)
+        else:
+            self.expand_audience_details(item_id)
+
+    def expand_audience_details(self, item_id):
+        """Expande los detalles de audiencias para una campaña específica."""
+        if item_id not in self.audience_data:
+            return
+
+        campaign_data = self.audience_data[item_id]
+        if not campaign_data or campaign_data == "N/A":
+            return
+
+        # Marcar como expandido
+        self.expanded_rows[item_id] = True
+        
+        # Actualizar el indicador en la primera columna
+        self.update_row_indicator(item_id, expanded=True)
+
+        # Obtener la posición donde insertar los detalles
+        item_index = self.campanas_tabla.index(item_id)
+        current_pos = item_index + 1
+        
+        # Insertar filas de detalles de audiencias
+        if 'included' in campaign_data and campaign_data['included']:
+            # Insertar encabezado de audiencias incluidas
+            header_id = self.campanas_tabla.insert("", current_pos, 
+                values=("", "📋 Audiencias Incluidas", "", "", "", "", "", "", "", "", "", "", ""),
+                tags=("audience_header",))
+            current_pos += 1
+            
+            # Insertar cada audiencia incluida
+            for i, audience_info in enumerate(campaign_data['included']):
+                if isinstance(audience_info, dict):
+                    # Ya tiene información de tamaño cargada
+                    audience_text = audience_info['display_text']
+                else:
+                    # Solo tiene el nombre, añadir botón para cargar tamaño
+                    audience_text = f"  • {audience_info}  [📊 Cargar tamaño]"
+                
+                detail_id = self.campanas_tabla.insert("", current_pos,
+                    values=("", audience_text, "", "", "", "", "", "", "", "", "", "", ""),
+                    tags=("audience_detail",))
+                current_pos += 1
+
+        if 'excluded' in campaign_data and campaign_data['excluded']:
+            # Insertar encabezado de audiencias excluidas
+            header_id = self.campanas_tabla.insert("", current_pos,
+                values=("", "🚫 Audiencias Excluidas", "", "", "", "", "", "", "", "", "", "", ""),
+                tags=("audience_header",))
+            current_pos += 1
+            
+            # Insertar cada audiencia excluida
+            for i, audience_info in enumerate(campaign_data['excluded']):
+                if isinstance(audience_info, dict):
+                    # Ya tiene información de tamaño cargada
+                    audience_text = audience_info['display_text']
+                else:
+                    # Solo tiene el nombre, añadir botón para cargar tamaño
+                    audience_text = f"  • {audience_info}  [📊 Cargar tamaño]"
+                
+                detail_id = self.campanas_tabla.insert("", current_pos,
+                    values=("", audience_text, "", "", "", "", "", "", "", "", "", "", ""),
+                    tags=("audience_detail",))
+                current_pos += 1
+
+    def load_audience_size(self, item_id, audience_text):
+        """Carga el tamaño de una audiencia específica."""
+        import threading
+        import requests
+        from config import KLAVIYO_URLS, HEADERS_KLAVIYO
+        
+        # Extraer el nombre de la audiencia (quitar símbolos y botón)
+        audience_name = audience_text.replace("  • ", "").replace("  [📊 Cargar tamaño]", "").strip()
+        
+        # Mostrar indicador de carga
+        loading_text = audience_text.replace("[📊 Cargar tamaño]", "[⏳ Cargando...]")
+        self.campanas_tabla.item(item_id, values=("", loading_text, "", "", "", "", "", "", "", "", "", "", ""))
+        
+        def fetch_size():
+            """Función para obtener el tamaño en un hilo separado."""
+            try:
+                # Buscar el audience_id en el cache de nombres
+                audience_id = None
+                for aid, name in self.audience_names_cache.items():
+                    if name == audience_name:
+                        audience_id = aid
+                        break
+                
+                if not audience_id:
+                    # No se encontró el ID, mostrar sin tamaño
+                    final_text = audience_text.replace("[📊 Cargar tamaño]", "")
+                    self.campanas_tabla.item(item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", ""))
+                    return
+                
+                # Intentar obtener como lista primero
+                profile_count = None
+                url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/?additional-fields[list]=profile_count"
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    profile_count = data['data']['attributes'].get('profile_count', 0)
+                else:
+                    # Intentar como segmento
+                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/?additional-fields[segment]=profile_count"
+                    response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        profile_count = data['data']['attributes'].get('profile_count', 0)
+                
+                # Actualizar la interfaz en el hilo principal
+                if profile_count is not None:
+                    final_text = audience_text.replace("[📊 Cargar tamaño]", f"({profile_count:,})")
+                else:
+                    final_text = audience_text.replace("[📊 Cargar tamaño]", "(No disponible)")
+                
+                # Programar la actualización en el hilo principal
+                self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
+                    item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", "")
+                ))
+                
+            except Exception as e:
+                # En caso de error, quitar el botón
+                final_text = audience_text.replace("[📊 Cargar tamaño]", "(Error)")
+                self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
+                    item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", "")
+                ))
+        
+        # Ejecutar en un hilo separado para no bloquear la UI
+        thread = threading.Thread(target=fetch_size)
+        thread.daemon = True
+        thread.start()            
+
+    def contract_audience_details(self, item_id):
+        """Contrae los detalles de audiencias para una campaña específica."""
+        # Marcar como contraído
+        self.expanded_rows[item_id] = False
+        
+        # Actualizar el indicador en la primera columna
+        self.update_row_indicator(item_id, expanded=False)
+
+        # Encontrar y eliminar todas las filas de detalles de audiencias
+        items_to_remove = []
+        item_index = self.campanas_tabla.index(item_id)
+        
+        # Buscar las filas siguientes que sean de audiencias
+        for child_id in self.campanas_tabla.get_children():
+            child_index = self.campanas_tabla.index(child_id)
+            if child_index > item_index:
+                tags = self.campanas_tabla.item(child_id, "tags")
+                if "audience_detail" in tags or "audience_header" in tags:
+                    items_to_remove.append(child_id)
+                else:
+                    # Si encontramos una fila que no es de audiencias, parar
+                    break
+
+        # Eliminar las filas encontradas
+        for item in items_to_remove:
+            self.campanas_tabla.delete(item)
+
+    def update_row_indicator(self, item_id, expanded=False):
+        """Actualiza el indicador ▶/▼ en la primera columna."""
+        current_values = list(self.campanas_tabla.item(item_id, "values"))
+        
+        # Extraer el número de campaña del valor actual
+        current_first_col = str(current_values[0])
+        if current_first_col.startswith("▶ ") or current_first_col.startswith("▼ "):
+            campaign_number = current_first_col[2:]
+        else:
+            campaign_number = current_first_col
+        
+        # Actualizar el indicador
+        if expanded:
+            current_values[0] = f"▼ {campaign_number}"
+        else:
+            current_values[0] = f"▶ {campaign_number}"
+        
+        # Actualizar la fila
+        self.campanas_tabla.item(item_id, values=current_values)
+
+    def store_audience_data(self, item_id, audience_info):
+        """Almacena los datos completos de audiencias para una campaña."""
+        # Primero intentar obtener datos completos desde el cache temporal
+        tags = self.campanas_tabla.item(item_id, "tags")
+        campaign_id = None
+        
+        for tag in tags:
+            if tag.startswith("campaign_"):
+                campaign_id = tag.replace("campaign_", "")
+                break
+        
+        if campaign_id:
+            # Buscar en datos temporales usando el campaign_id
+            temp_key = f"temp_{campaign_id}"
+            if temp_key in self.audience_data:
+                # Usar datos completos del cache temporal
+                self.audience_data[item_id] = self.audience_data[temp_key]
+                # Limpiar el cache temporal
+                del self.audience_data[temp_key]
+                return
+        
+        # Si no hay datos temporales, parsear la información de audiencias
+        if audience_info == "N/A" or not audience_info:
+            self.audience_data[item_id] = None
+            return
+
+        parsed_data = self.parse_audience_info(audience_info)
+        self.audience_data[item_id] = parsed_data
+
+    def parse_audience_info(self, audience_info):
+        """Parsea la información de audiencias para extraer los nombres completos."""
+        if not audience_info or audience_info == "N/A":
+            return None
+        
+        try:
+            # El formato viene como: "Inc: Nombre1, Nombre2, +3; Exc: Nombre4, Nombre5"
+            result = {}
+            
+            # Dividir por "; " para separar incluidas y excluidas
+            parts = audience_info.split("; ")
+            
+            for part in parts:
+                if part.startswith("Inc: "):
+                    # Extraer audiencias incluidas
+                    included_str = part[5:]  # Quitar "Inc: "
+                    included_list = [name.strip() for name in included_str.split(", ")]
+                    # Filtrar los indicadores "+X" 
+                    included_list = [name for name in included_list if not name.startswith("+")]
+                    result['included'] = included_list
+                    
+                elif part.startswith("Exc: "):
+                    # Extraer audiencias excluidas
+                    excluded_str = part[5:]  # Quitar "Exc: "
+                    excluded_list = [name.strip() for name in excluded_str.split(", ")]
+                    # Filtrar los indicadores "+X"
+                    excluded_list = [name for name in excluded_list if not name.startswith("+")]
+                    result['excluded'] = excluded_list
+            
+            return result if result else None
+            
+        except Exception as e:
+            print(f"Error parseando audiencias: {e}")
+            return None
 
     def show_context_menu(self, event):
         """Muestra el menú contextual si el clic derecho ocurre en la columna 'Order Count'."""
@@ -157,7 +428,7 @@ class ViewManager:
         """Crea y configura la tabla de total general (grand_total_tabla)."""
         self.grand_total_tabla = ttk.Treeview(parent_frame, columns=(
             "Numero", "Nombre", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "PerRecipient", "OrderCount", "Audiences"  # Añadida nueva columna
+            "OrderSumValue", "PerRecipient", "OrderCount"  # ELIMINAR Audiences
         ), show="headings", height=1)
         self.grand_total_tabla.grid(row=3, column=0, sticky="ew", pady=5)
 
@@ -170,7 +441,6 @@ class ViewManager:
         self.grand_total_tabla.heading("OrderSumValue", text="Total Value (USD)")
         self.grand_total_tabla.heading("PerRecipient", text="Per Recipient")
         self.grand_total_tabla.heading("OrderCount", text="Order Count")
-        self.grand_total_tabla.heading("Audiences", text="Audiencias")
 
         self.grand_total_tabla.column("Numero", width=column_widths["Numero"], anchor="center")
         self.grand_total_tabla.column("Nombre", width=column_widths["Nombre"])
@@ -181,7 +451,6 @@ class ViewManager:
         self.grand_total_tabla.column("OrderSumValue", width=column_widths["OrderSumValue"], anchor="e")
         self.grand_total_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
         self.grand_total_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
-        self.grand_total_tabla.column("Audiences", width=column_widths["Audiences"])
 
         self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), background="#23376D", foreground="white")
 
@@ -332,6 +601,8 @@ class ViewManager:
             if url and not url.startswith("Fecha de envío:") and not url.startswith("No se encontraron") and not url == "Análisis completado.":
                 self.resultados_context_menu.post(event.x_root, event.y_root)
 
+                
+
     def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None, start_date=None, end_date=None):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.email_preview.is_analysis_mode = True
@@ -445,3 +716,4 @@ class ViewManager:
         self.resultados_tabla.bind("<Button-3>", self.show_context_menu_results)
 
         self.resultados_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
+

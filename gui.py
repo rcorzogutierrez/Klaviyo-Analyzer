@@ -252,6 +252,7 @@ class ResultadosApp:
         self.update_grouping(None)
 
     def update_grouping(self, event=None):
+        """Función modificada para pasar view_manager a mostrar_campanas_en_tabla."""
         self.template_ids.clear()
         
         try:
@@ -260,7 +261,8 @@ class ResultadosApp:
                 self.campanas_tabla, 
                 self.grouping_var.get(), 
                 self.show_local_value.get(),
-                template_ids_dict=self.template_ids
+                template_ids_dict=self.template_ids,
+                view_manager=self.view_manager  # PASAR VIEW_MANAGER
             )
         except Exception as e:
             print(f"Error al actualizar la tabla de campañas: {str(e)}")
@@ -342,6 +344,9 @@ def abrir_resultados(list_start_date, list_end_date):
         root.update()
 
     root.update()
+    app = None
+    temp_app = ResultadosApp.__new__(ResultadosApp)
+    temp_app.view_manager = ViewManager(None, 0, 0, None, None)
 
     campanas, error = obtener_campanas(list_start_date, list_end_date, update_text)
     if error:

@@ -111,16 +111,40 @@ class Analyzer:
         visible_campaigns = []
         for item in self.campanas_tabla.get_children():
             tags = self.campanas_tabla.item(item, "tags")
-            # Ignorar filas de subtotales o totales
-            if "subtotal" in tags or "grand_total" in tags:
+            # Ignorar filas de subtotales, totales, encabezados de país/fecha, y filas de audiencias
+            if ("subtotal" in tags or "grand_total" in tags or "bold" in tags or 
+                "audience_detail" in tags or "audience_header" in tags):
                 continue
+                
             values = self.campanas_tabla.item(item, "values")
-            campaign_id = values[0]  # El ID de la campaña está en la primera columna
-            # Buscar la campaña correspondiente en self.campanas
+            
+            # Verificar que la fila tiene valores y que es una campaña real
+            if not values or len(values) < 2:
+                continue
+                
+            # El ID de la campaña está en la primera columna, pero puede tener el formato "▶ #" o "▼ #"
+            campaign_display_id = str(values[0]).strip()
+            
+            # Extraer el número real del ID (quitar ▶ o ▼ si están presentes)
+            if campaign_display_id.startswith("▶ ") or campaign_display_id.startswith("▼ "):
+                campaign_number = campaign_display_id[2:].strip()
+            else:
+                campaign_number = campaign_display_id
+                
+            # Verificar que es un número válido
+            try:
+                campaign_idx = int(campaign_number)
+            except ValueError:
+                # Si no es un número, no es una fila de campaña válida
+                continue
+            
+            # Buscar la campaña correspondiente en self.campanas usando el índice
             for camp in self.campanas:
-                if str(camp[0]) == str(campaign_id):  # camp[0] es el idx que coincide con campaign_id
+                if camp[0] == campaign_idx:  # camp[0] es el idx que coincide con campaign_idx
                     visible_campaigns.append(camp)
                     break
+                    
+        print(f"Debug: Encontradas {len(visible_campaigns)} campañas visibles")  # Para debug
         return visible_campaigns
 
     def _run_analysis(self, seleccionados):
@@ -128,8 +152,8 @@ class Analyzer:
         self.last_results.clear()
         self.all_click_data.clear()
         resultados_por_fecha_pais = defaultdict(lambda: defaultdict(list))
-        for camp in seleccionados:
-            idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        for camp in seleccionados:            
+            idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
             try:
                 send_date = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
             except ValueError as ve:
