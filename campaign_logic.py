@@ -265,7 +265,8 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                 update_callback(f"Procesando audiencia {i+1}/{len(unique_audience_ids)}")
             
             try:
-                # Intentar como lista primero (SIN additional-fields)
+                # VERSIÓN RÁPIDA SIN TAMAÑOS (CÓDIGO ORIGINAL)
+                # Intentar como lista primero
                 url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
                 response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
                 
@@ -274,54 +275,40 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                     name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
                     audience_names_cache[audience_id] = name
                     continue
-                    
-                    
-                        
-                else:
-                    # VERSIÓN RÁPIDA SIN TAMAÑOS (CÓDIGO ORIGINAL)
-                    # Intentar como lista primero
-                    url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/"
+                elif response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 10))
+                    if update_callback:
+                        update_callback(f"Rate limit en audiencias - esperando {retry_after}s")
+                    time.sleep(retry_after)
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
-                    
                     if response.status_code == 200:
                         data = response.json()
                         name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
                         audience_names_cache[audience_id] = name
                         continue
-                    elif response.status_code == 429:
-                        retry_after = int(response.headers.get('Retry-After', 10))
-                        if update_callback:
-                            update_callback(f"Rate limit en audiencias - esperando {retry_after}s")
-                        time.sleep(retry_after)
-                        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
-                        if response.status_code == 200:
-                            data = response.json()
-                            name = data['data']['attributes'].get('name', f"List-{audience_id[:8]}")
-                            audience_names_cache[audience_id] = name
-                            continue
-                    
-                    # Intentar como segmento
-                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
+                
+                # Intentar como segmento
+                url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/"
+                response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
+                    audience_names_cache[audience_id] = name
+                elif response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 10))
+                    if update_callback:
+                        update_callback(f"Rate limit en segmentos - esperando {retry_after}s")
+                    time.sleep(retry_after)
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
-                    
                     if response.status_code == 200:
                         data = response.json()
                         name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
                         audience_names_cache[audience_id] = name
-                    elif response.status_code == 429:
-                        retry_after = int(response.headers.get('Retry-After', 10))
-                        if update_callback:
-                            update_callback(f"Rate limit en segmentos - esperando {retry_after}s")
-                        time.sleep(retry_after)
-                        response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
-                        if response.status_code == 200:
-                            data = response.json()
-                            name = data['data']['attributes'].get('name', f"Segment-{audience_id[:8]}")
-                            audience_names_cache[audience_id] = name
-                        else:
-                            audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
                     else:
                         audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
+                else:
+                    audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
                         
             except Exception as e:
                 if update_callback:
@@ -330,6 +317,10 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
             
             # Pausa entre solicitudes para evitar rate limiting
             time.sleep(0.1)
+    
+    # NUEVO: Pasar el cache de nombres al ViewManager
+    if view_manager:
+        view_manager.set_audience_names_cache(audience_names_cache)
     
     # Ahora precargar detalles de campañas usando el cache de audiencias
     preload_campaign_details_with_audiences(
@@ -479,7 +470,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
 def agrupar_por_pais(campanas):
     grupos = defaultdict(list)
     for camp in campanas:
-        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        idx, campaign_id, name, send_time, *_ = camp  # Usar *_ para manejar campos adicionales
         partes = name.split("_")
         pais = partes[-1].strip().lower() if len(partes) > 1 else "desconocido"
         grupos[pais].append(camp)
@@ -488,7 +479,7 @@ def agrupar_por_pais(campanas):
 def agrupar_por_fecha(campanas):
     grupos = defaultdict(list)
     for camp in campanas:
-        idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        idx, campaign_id, name, send_time, *_ = camp  # Usar *_ para manejar campos adicionales
         try:
             date_only = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
         except ValueError:

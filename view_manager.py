@@ -19,6 +19,7 @@ class ViewManager:
         # NUEVAS VARIABLES PARA EL SISTEMA DROPDOWN
         self.expanded_rows = {}  # Almacena el estado de expansión de cada fila
         self.audience_data = {}  # Almacena los datos completos de audiencias
+        self.audience_names_cache = {}  # AGREGAR CACHE DE NOMBRES
 
     def create_campanas_tabla(self, treeview_frame, total_table_width):
         # Crear la tabla SIN la columna "Audiences"
@@ -103,13 +104,25 @@ class ViewManager:
         """Maneja el clic simple para expandir/contraer audiencias solo en la primera columna."""
         # Identificar qué columna fue clickeada
         column = self.campanas_tabla.identify_column(event.x)
+        item = self.campanas_tabla.identify_row(event.y)
+        
+        if not item:
+            return
+            
+        # Debug: Imprimir información del clic
+        values = self.campanas_tabla.item(item, "values")
+        tags = self.campanas_tabla.item(item, "tags")      
+        
         if column == "#1":  # Solo en la primera columna (Numero)
-            item = self.campanas_tabla.identify_row(event.y)
-            if item:
-                # Verificar si es una fila de campaña (no de grupo o subtotal)
-                tags = self.campanas_tabla.item(item, "tags")
-                if any(tag.startswith("campaign_") for tag in tags):
-                    self.toggle_audience_details(item)
+            # Verificar si es una fila de campaña (no de grupo o subtotal)
+            if any(tag.startswith("campaign_") for tag in tags):
+                self.toggle_audience_details(item)
+                
+        # NUEVO: Verificar si es una fila de audiencia con icono de carga EN CUALQUIER COLUMNA
+        if "audience_detail" in tags:
+            audience_text = values[1] if len(values) > 1 else ""            
+            if "🔃" in audience_text:                
+                self.load_audience_size(item, audience_text)
 
     def on_double_click(self, event):
         """Maneja el doble clic para preview del template (funcionalidad original)."""
@@ -158,8 +171,8 @@ class ViewManager:
                     # Ya tiene información de tamaño cargada
                     audience_text = audience_info['display_text']
                 else:
-                    # Solo tiene el nombre, añadir botón para cargar tamaño
-                    audience_text = f"  • {audience_info}  [📊 Cargar tamaño]"
+                    # Solo tiene el nombre, añadir botón para cargar tamaño - CAMBIO AQUÍ
+                    audience_text = f"  • {audience_info}  🔃"
                 
                 detail_id = self.campanas_tabla.insert("", current_pos,
                     values=("", audience_text, "", "", "", "", "", "", "", "", "", "", ""),
@@ -179,8 +192,8 @@ class ViewManager:
                     # Ya tiene información de tamaño cargada
                     audience_text = audience_info['display_text']
                 else:
-                    # Solo tiene el nombre, añadir botón para cargar tamaño
-                    audience_text = f"  • {audience_info}  [📊 Cargar tamaño]"
+                    # Solo tiene el nombre, añadir botón para cargar tamaño - CAMBIO AQUÍ
+                    audience_text = f"  • {audience_info}  🔃"
                 
                 detail_id = self.campanas_tabla.insert("", current_pos,
                     values=("", audience_text, "", "", "", "", "", "", "", "", "", "", ""),
@@ -193,11 +206,12 @@ class ViewManager:
         import requests
         from config import KLAVIYO_URLS, HEADERS_KLAVIYO
         
-        # Extraer el nombre de la audiencia (quitar símbolos y botón)
-        audience_name = audience_text.replace("  • ", "").replace("  [📊 Cargar tamaño]", "").strip()
+                
+        # Extraer el nombre de la audiencia (quitar símbolos y botón) - CAMBIO AQUÍ
+        audience_name = audience_text.replace("  • ", "").replace("  🔃", "").strip()       
         
-        # Mostrar indicador de carga
-        loading_text = audience_text.replace("[📊 Cargar tamaño]", "[⏳ Cargando...]")
+        # Mostrar indicador de carga - CAMBIO AQUÍ
+        loading_text = audience_text.replace("🔃", "⏳")
         self.campanas_tabla.item(item_id, values=("", loading_text, "", "", "", "", "", "", "", "", "", "", ""))
         
         def fetch_size():
@@ -207,36 +221,47 @@ class ViewManager:
                 audience_id = None
                 for aid, name in self.audience_names_cache.items():
                     if name == audience_name:
-                        audience_id = aid
+                        audience_id = aid                        
                         break
                 
                 if not audience_id:
-                    # No se encontró el ID, mostrar sin tamaño
-                    final_text = audience_text.replace("[📊 Cargar tamaño]", "")
-                    self.campanas_tabla.item(item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", ""))
-                    return
+                    print(f"No se encontró ID para '{audience_name}'")
+                    print(f"Audiencias disponibles en cache: {list(self.audience_names_cache.values())}")
+                    # No se encontró el ID, mostrar sin tamaño - CAMBIO AQUÍ
+                    final_text = audience_text.replace("  🔃", " (ID no encontrado)")
+                    self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
+                        item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", "")
+                    ))
+                    return              
+                
                 
                 # Intentar obtener como lista primero
                 profile_count = None
                 url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/?additional-fields[list]=profile_count"
+                
                 response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    profile_count = data['data']['attributes'].get('profile_count', 0)
-                else:
+                    profile_count = data['data']['attributes'].get('profile_count', 0)                 
+                else:                    
                     # Intentar como segmento
-                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/?additional-fields[segment]=profile_count"
+                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/?additional-fields[segment]=profile_count"                    
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=10)
                     if response.status_code == 200:
                         data = response.json()
-                        profile_count = data['data']['attributes'].get('profile_count', 0)
+                        profile_count = data['data']['attributes'].get('profile_count', 0)                        
+                    else:
+                        print(f"También falló como segmento (status: {response.status_code})")
                 
                 # Actualizar la interfaz en el hilo principal
                 if profile_count is not None:
-                    final_text = audience_text.replace("[📊 Cargar tamaño]", f"({profile_count:,})")
+                    # CAMBIO AQUÍ - quitar el icono de carga y añadir el conteo
+                    final_text = audience_text.replace("  🔃", f" ({profile_count:,})")
+                   
                 else:
-                    final_text = audience_text.replace("[📊 Cargar tamaño]", "(No disponible)")
+                    final_text = audience_text.replace("  🔃", " (No disponible)")
+                    print("No se pudo obtener el conteo")
                 
                 # Programar la actualización en el hilo principal
                 self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
@@ -244,8 +269,9 @@ class ViewManager:
                 ))
                 
             except Exception as e:
-                # En caso de error, quitar el botón
-                final_text = audience_text.replace("[📊 Cargar tamaño]", "(Error)")
+                print(f"Error en fetch_size: {str(e)}")
+                # En caso de error, quitar el botón - CAMBIO AQUÍ
+                final_text = audience_text.replace("  🔃", f" (Error: {str(e)})")
                 self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
                     item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", "")
                 ))
@@ -365,6 +391,11 @@ class ViewManager:
         except Exception as e:
             print(f"Error parseando audiencias: {e}")
             return None
+
+    # MÉTODO PARA PASAR EL CACHE DE NOMBRES DESDE CAMPAIGN_LOGIC
+    def set_audience_names_cache(self, cache):
+        """Establece el cache de nombres de audiencias."""
+        self.audience_names_cache = cache
 
     def show_context_menu(self, event):
         """Muestra el menú contextual si el clic derecho ocurre en la columna 'Order Count'."""
@@ -601,8 +632,6 @@ class ViewManager:
             if url and not url.startswith("Fecha de envío:") and not url.startswith("No se encontraron") and not url == "Análisis completado.":
                 self.resultados_context_menu.post(event.x_root, event.y_root)
 
-                
-
     def setup_analysis_view(self, grouping_var, show_local_value, update_grouping_callback, cerrar_analisis_callback, filter_callback=None, start_date=None, end_date=None):
         """Configura la vista con dos paneles: métricas a la izquierda y resultados a la derecha."""
         self.email_preview.is_analysis_mode = True
@@ -716,4 +745,3 @@ class ViewManager:
         self.resultados_tabla.bind("<Button-3>", self.show_context_menu_results)
 
         self.resultados_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
-

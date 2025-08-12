@@ -21,8 +21,10 @@ if os.name == 'nt':  # Solo en Windows
     except Exception as e:
         print(f"No se pudo establecer la conciencia de DPI: {e}")
 
+# MODIFICACIÓN EN LA CLASE ResultadosApp en gui.py
+
 class ResultadosApp:
-    def __init__(self, root, campanas, list_start_date, list_end_date):
+    def __init__(self, root, campanas, list_start_date, list_end_date, audience_cache=None):  # AGREGAR PARÁMETRO
         self.root = root
         self.campanas = campanas
         self.list_start_date = list_start_date
@@ -89,6 +91,10 @@ class ResultadosApp:
             self.email_preview,
             self.exporter
         )
+        
+        # CONFIGURAR EL CACHE DE AUDIENCIAS SI SE PROPORCIONÓ
+        if audience_cache:
+            self.view_manager.set_audience_names_cache(audience_cache)
 
         # Frame para centrar el campo de entrada y el checkbox
         self.entry_frame = tk.Frame(self.main_frame)
@@ -345,10 +351,13 @@ def abrir_resultados(list_start_date, list_end_date):
 
     root.update()
     app = None
-    temp_app = ResultadosApp.__new__(ResultadosApp)
-    temp_app.view_manager = ViewManager(None, 0, 0, None, None)
+    
+    # CREAR UN VIEW_MANAGER TEMPORAL PARA PASAR A obtener_campanas
+    temp_view_manager = ViewManager(None, 0, 0, None, None)
 
-    campanas, error = obtener_campanas(list_start_date, list_end_date, update_text)
+    # PASAR EL VIEW_MANAGER A obtener_campanas
+    campanas, error = obtener_campanas(list_start_date, list_end_date, update_text, temp_view_manager)
+    
     if error:
         texto_resultados.delete(1.0, tk.END)
         texto_resultados.insert(tk.END, f"Error al cargar campañas: {error}\n")
@@ -363,7 +372,8 @@ def abrir_resultados(list_start_date, list_end_date):
                  activeforeground="white", font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
     else:
         texto_resultados.pack_forget()
-        app = ResultadosApp(root, campanas, list_start_date, list_end_date)
+        # PASAR EL CACHE AL RESULTADOS_APP
+        app = ResultadosApp(root, campanas, list_start_date, list_end_date, temp_view_manager.audience_names_cache)
 
     root.mainloop()
 
