@@ -340,13 +340,54 @@ def abrir_resultados(list_start_date, list_end_date):
 
     root.after_ids = []
 
+    # ScrolledText para mostrar todos los mensajes sin borrar
     texto_resultados = scrolledtext.ScrolledText(root, wrap=tk.WORD, height=35)
     texto_resultados.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
     texto_resultados.insert(tk.END, "Cargando...\n")
 
+    def format_timestamp():
+        """Retorna timestamp formateado"""
+        from datetime import datetime
+        return datetime.now().strftime("%H:%M:%S")
+
     def update_text(message):
-        texto_resultados.delete(1.0, tk.END)
-        texto_resultados.insert(tk.END, f"{message}\n")
+        # Verificar si es una actualización incremental
+        if message.startswith("ACTUALIZAR:"):
+            # Extraer el mensaje real
+            actual_message = message[11:]  # Quitar "ACTUALIZAR:"
+            timestamp = format_timestamp()
+            
+            # Obtener el contenido actual
+            current_content = texto_resultados.get("1.0", tk.END)
+            lines = current_content.strip().split('\n')
+            
+            if lines and len(lines) > 1:
+                # Buscar la última línea que NO sea un mensaje de completado (✅) 
+                # y que NO esté vacía
+                line_to_update = -1
+                for i in range(len(lines) - 1, -1, -1):
+                    line = lines[i].strip()
+                    if line and not line.endswith("✅ Completado:") and not "✅ Completado:" in line:
+                        line_to_update = i
+                        break
+                
+                if line_to_update >= 0:
+                    # Eliminar la línea encontrada y reemplazarla
+                    texto_resultados.delete(f"{line_to_update + 1}.0", f"{line_to_update + 2}.0")
+                    texto_resultados.insert(f"{line_to_update + 1}.0", f"[{timestamp}] {actual_message}\n")
+                else:
+                    # Si no se encontró línea válida, agregar normalmente
+                    texto_resultados.insert(tk.END, f"[{timestamp}] {actual_message}\n")
+            else:
+                # Si no hay líneas, agregar normalmente
+                texto_resultados.insert(tk.END, f"[{timestamp}] {actual_message}\n")
+        else:
+            # Mensaje normal - agregar nueva línea
+            timestamp = format_timestamp()
+            texto_resultados.insert(tk.END, f"[{timestamp}] {message}\n")
+        
+        # Auto-scroll hacia abajo
+        texto_resultados.see(tk.END)
         root.update()
 
     root.update()
@@ -359,21 +400,40 @@ def abrir_resultados(list_start_date, list_end_date):
     campanas, error = obtener_campanas(list_start_date, list_end_date, update_text, temp_view_manager)
     
     if error:
-        texto_resultados.delete(1.0, tk.END)
-        texto_resultados.insert(tk.END, f"Error al cargar campañas: {error}\n")
-        # Frame para centrar los botones
+        # Agregar el error al historial con timestamp
+        timestamp = format_timestamp()
+        texto_resultados.insert(tk.END, f"[{timestamp}] Error al cargar campañas: {error}\n")
+        texto_resultados.see(tk.END)
+        
+        # Frame para centrar los botones de error
         buttons_frame = tk.Frame(root)
         buttons_frame.pack(pady=10)
-        tk.Button(buttons_frame, text="Cerrar", command=lambda: [root.quit(), root.destroy()], 
-                 bg="#23376D", fg="white", activebackground="#3A4F9A", 
-                 activeforeground="white", font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
-        tk.Button(buttons_frame, text="Nuevo rango de fecha", command=lambda: [root.quit(), root.destroy(), main()], 
-                 bg="#23376D", fg="white", activebackground="#3A4F9A", 
-                 activeforeground="white", font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(buttons_frame, text="Cerrar", 
+                 command=lambda: [root.quit(), root.destroy()], 
+                 bg="#23376D", fg="white", 
+                 activebackground="#3A4F9A", 
+                 activeforeground="white", 
+                 font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(buttons_frame, text="Nuevo rango de fecha", 
+                 command=lambda: [root.quit(), root.destroy(), main()], 
+                 bg="#23376D", fg="white", 
+                 activebackground="#3A4F9A", 
+                 activeforeground="white", 
+                 font=("TkDefaultFont", 10, "bold")).pack(side=tk.LEFT, padx=5)
     else:
-        texto_resultados.pack_forget()
-        # PASAR EL CACHE AL RESULTADOS_APP
-        app = ResultadosApp(root, campanas, list_start_date, list_end_date, temp_view_manager.audience_names_cache)
+        # Agregar mensaje final al historial
+        timestamp = format_timestamp()
+        texto_resultados.insert(tk.END, f"[{timestamp}] ✅ Carga completada exitosamente\n")
+        texto_resultados.see(tk.END)
+        root.update()
+        
+        # Esperar un momento para que el usuario vea el mensaje final
+        root.after(1000, lambda: [
+            texto_resultados.pack_forget(),  # Ocultar la ventana de carga
+            ResultadosApp(root, campanas, list_start_date, list_end_date, temp_view_manager.audience_names_cache)
+        ])
 
     root.mainloop()
 

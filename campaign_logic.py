@@ -98,13 +98,13 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
     total_campaigns = len(campaign_ids)
     
     if update_callback:
-        update_callback(f"Procesando detalles de campañas (0/{total_campaigns})")
+        update_callback(f"Procesando detalles de campañas...")
     
     for campaign_id in campaign_ids:
         if campaign_id not in cache:
             count += 1
             if update_callback:
-                update_callback(f"Procesando detalles de campañas ({count}/{total_campaigns})")
+                update_callback(f"ACTUALIZAR:Procesando detalles de campañas ({count}/{total_campaigns})")
             
             try:
                 # Usar datos temporales si están disponibles
@@ -119,7 +119,7 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
                     elif response.status_code == 429:
                         retry_after = int(response.headers.get('Retry-After', 17))
                         if update_callback:
-                            update_callback(f"Rate limit - esperando {retry_after}s")
+                            update_callback(f"ACTUALIZAR:Rate limit - esperando {retry_after}s (campaña {count}/{total_campaigns})")
                         time.sleep(retry_after)
                         response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
                         if response.status_code == 200:
@@ -137,10 +137,10 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
                     send_time = datetime.fromisoformat(send_time.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
 
                 # Obtener subject line, preview text y template_id
-                subject_line, preview_text, template_id = get_campaign_message_subject(campaign_data, update_callback)
+                subject_line, preview_text, template_id = get_campaign_message_subject(campaign_data, None)  # Sin update_callback
 
                 # Obtener audiencias usando el cache
-                audiences_info = get_campaign_audiences_with_cache(campaign_data, audience_cache, update_callback)
+                audiences_info = get_campaign_audiences_with_cache(campaign_data, audience_cache, None)  # Sin update_callback
 
                 # NUEVO: Extraer audiencias completas para el view_manager
                 if view_manager:
@@ -154,11 +154,11 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
                 
             except Exception as e:
                 if update_callback:
-                    update_callback(f"Error procesando campaña {campaign_id}: {str(e)}")
+                    update_callback(f"ACTUALIZAR:Error procesando campaña {count}/{total_campaigns}: {str(e)}")
                 cache[campaign_id] = (f"Campaign {campaign_id}", 'N/A', "No Subject Line", "No Preview Text", None, "N/A")
     
     if update_callback:
-        update_callback("Procesamiento de detalles de campañas completado")
+        update_callback(f"ACTUALIZAR:✅ Completado: detalles de {total_campaigns} campañas procesadas")
 
 
 def obtener_campanas(list_start_date, list_end_date, update_callback, view_manager=None, include_audience_sizes=False):
@@ -215,7 +215,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
     # Primera pasada: obtener datos básicos de campañas y extraer IDs de audiencias
     for i, campaign_id in enumerate(campaign_ids):
         if update_callback and i % 10 == 0:
-            update_callback(f"Extrayendo audiencias de campañas ({i+1}/{len(campaign_ids)})")
+            update_callback(f"ACTUALIZAR:Extrayendo audiencias de campañas ({i+1}/{len(campaign_ids)})")
         
         try:
             url = f"{KLAVIYO_URLS['CAMPAIGN_DETAILS']}{campaign_id}/"
@@ -233,7 +233,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
             elif response.status_code == 429:
                 retry_after = int(response.headers.get('Retry-After', 17))
                 if update_callback:
-                    update_callback(f"Rate limit - esperando {retry_after}s")
+                    update_callback(f"ACTUALIZAR:Rate limit - esperando {retry_after}s (campaña {i+1}/{len(campaign_ids)})")
                 time.sleep(retry_after)
                 # Reintentar
                 response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
@@ -246,7 +246,11 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                     all_audience_ids.extend(included + excluded)
         except Exception as e:
             if update_callback:
-                update_callback(f"Error obteniendo campaña {campaign_id}: {str(e)}")
+                update_callback(f"ACTUALIZAR:Error obteniendo campaña {i+1}/{len(campaign_ids)}: {str(e)}")
+    
+    # Mensaje de finalización para extracción de audiencias
+    if update_callback:
+        update_callback(f"ACTUALIZAR:✅ Completado: audiencias extraídas de {len(campaign_ids)} campañas")
     
     # Precargar nombres de audiencias únicas CON/SIN TAMAÑOS según el parámetro
     unique_audience_ids = list(set(all_audience_ids))
@@ -258,11 +262,13 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                 update_callback(f"Obteniendo nombres y tamaños de {len(unique_audience_ids)} audiencias únicas (esto puede tomar varios minutos)...")
         else:
             if update_callback:
+                # Mensaje inicial que se va a actualizar
                 update_callback(f"Obteniendo nombres de {len(unique_audience_ids)} audiencias únicas...")
         
         for i, audience_id in enumerate(unique_audience_ids):
-            if update_callback and i % 5 == 0:
-                update_callback(f"Procesando audiencia {i+1}/{len(unique_audience_ids)}")
+            # Actualizar la misma línea cada audiencia procesada
+            if update_callback:
+                update_callback(f"ACTUALIZAR:Procesando audiencia {i+1}/{len(unique_audience_ids)}")
             
             try:
                 # VERSIÓN RÁPIDA SIN TAMAÑOS (CÓDIGO ORIGINAL)
@@ -278,7 +284,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                 elif response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', 10))
                     if update_callback:
-                        update_callback(f"Rate limit en audiencias - esperando {retry_after}s")
+                        update_callback(f"ACTUALIZAR:Rate limit en audiencias - esperando {retry_after}s (audiencia {i+1}/{len(unique_audience_ids)})")
                     time.sleep(retry_after)
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
                     if response.status_code == 200:
@@ -298,7 +304,7 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                 elif response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', 10))
                     if update_callback:
-                        update_callback(f"Rate limit en segmentos - esperando {retry_after}s")
+                        update_callback(f"ACTUALIZAR:Rate limit en segmentos - esperando {retry_after}s (audiencia {i+1}/{len(unique_audience_ids)})")
                     time.sleep(retry_after)
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=30)
                     if response.status_code == 200:
@@ -312,11 +318,15 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                         
             except Exception as e:
                 if update_callback:
-                    update_callback(f"Error obteniendo audiencia {audience_id}: {str(e)}")
+                    update_callback(f"ACTUALIZAR:Error obteniendo audiencia {i+1}/{len(unique_audience_ids)}: {str(e)}")
                 audience_names_cache[audience_id] = f"ID-{audience_id[:8]}"
             
             # Pausa entre solicitudes para evitar rate limiting
             time.sleep(0.1)
+        
+        # Mensaje final para esta sección
+        if update_callback:
+            update_callback(f"ACTUALIZAR:✅ Completado: {len(unique_audience_ids)} audiencias procesadas")
     
     # NUEVO: Pasar el cache de nombres al ViewManager
     if view_manager:
@@ -446,16 +456,15 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                     'order_count': order_metrics["count"],
                     'per_recipient': per_recipient,
                 })
-                if update_callback:
-                    update_callback(f"Campaña filtrada: ID: {campaign_id}, Nombre: {name}, Send Time: {send_time}, Open Rate: {open_rate}%, Click Rate: {click_rate}%, Delivered: {delivered}, Unique Orders: {order_metrics['unique']}, Total Value (USD): {usd_value:.2f}, Total Value (Local): {local_value:.2f} {CURRENCY_SYMBOLS.get(currency, '$')}, Order Count: {order_metrics['count']}, Per Recipient: {per_recipient:.2f}")
+                # Eliminar el mensaje detallado de cada campaña individual
         except ValueError as ve:
             if update_callback:
                 update_callback(f"Error en formato de send_time para {name}: {send_time} - Error: {ve}")
             return None, f"Formato de send_time inválido para {name}: {send_time}"
 
     if update_callback:
-        update_callback(f"Campañas filtradas totales: {len(filtered_campaigns)}")
-    update_callback(f"Carga completa - Total de campañas filtradas: {len(filtered_campaigns)}")
+        update_callback(f"ACTUALIZAR:Procesando campañas filtradas: {len(filtered_campaigns)}")
+    update_callback(f"ACTUALIZAR:✅ Carga completada - Total: {len(filtered_campaigns)} campañas")
 
     # Formatear las campañas para la salida esperada
     campaigns_list = [
