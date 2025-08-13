@@ -29,6 +29,43 @@ class Analyzer:
         self.animation_id = None  # Para almacenar el ID del after y poder cancelarlo
         self.dots = 0  # Contador para los puntos suspensivos
 
+    def update_progress(self, message):
+        """Actualiza el progreso en la tabla de resultados"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        if message.startswith("ACTUALIZAR:"):
+            # Actualizar la última línea (incremental)
+            actual_message = message[11:]
+            children = self.resultados_tabla.get_children()
+            
+            if children:
+                # Buscar la última fila que no sea de finalización
+                for item in reversed(children):
+                    values = self.resultados_tabla.item(item, "values")
+                    if values and len(values) > 2:
+                        url_text = values[2]
+                        if not ("✅" in url_text or "❌" in url_text or "Análisis completado" in url_text):
+                            self.resultados_tabla.item(item, values=("", "", f"[{timestamp}] {actual_message}", "", ""))
+                            break
+            else:
+                self.resultados_tabla.insert("", "end", values=("", "", f"[{timestamp}] {actual_message}", "", ""), tags=("bold",))
+        else:
+            # Agregar nueva línea
+            self.resultados_tabla.insert("", "end", values=("", "", f"[{timestamp}] {message}", "", ""), tags=("bold",))
+        
+        # Auto-scroll y actualizar
+        if self.resultados_tabla.get_children():
+            self.resultados_tabla.see(self.resultados_tabla.get_children()[-1])
+        self.root.update()
+
+    def show_real_results(self):
+        """Limpia el progreso y muestra los resultados reales"""
+        # Limpiar mensajes de progreso
+        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
+        
+        # Mostrar resultados reales usando el método existente
+        self.apply_filter()
+
     def analizar(self):
         # Verificar si estamos en modo análisis; si no, cambiar a la vista de análisis
         if not self.is_analysis_mode.get():
@@ -40,27 +77,38 @@ class Analyzer:
             self._finalize_ui()  # Asegurarse de rehabilitar widgets incluso en caso de error
             return
 
+        # Limpiar resultados anteriores
+        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
+        
+        # AGREGAR PROGRESO INICIAL
+        self.update_progress("🔄 Iniciando análisis...")
+
         # Determinar si se deben analizar todas las campañas o usar el filtro
         if self.analyze_all_campaigns.get():
+            self.update_progress("📋 Analizando todas las campañas...")
             seleccionados = self.get_all_visible_campaigns()
             if not seleccionados:
-                messagebox.showinfo("Información", "No hay campañas visibles en la tabla para analizar.")
-                self._finalize_ui()  # Rehabilitar widgets si no hay campañas
+                self.update_progress("❌ Error: No hay campañas visibles en la tabla")
+                self._finalize_ui()
                 return
             # Actualizar la etiqueta para reflejar que se están analizando todas las campañas
             self.resultados_label.config(text="Resultados del análisis: Todas las campañas", font=("TkDefaultFont", 12, "bold"), fg="#23376D")
         else:
+            self.update_progress("🔍 Filtrando campañas...")
             input_str = self.entry.get().strip()
             if not input_str:
-                messagebox.showinfo("Información", "Por favor, ingrese códigos de país, palabras clave o números de campaña.")
-                self._finalize_ui()  # Rehabilitar widgets si no hay entrada
+                self.update_progress("❌ Error: Ingrese criterios de búsqueda")
+                self._finalize_ui()
                 return
             seleccionados = seleccionar_campanas(self.campanas, input_str)
             if not seleccionados:
-                self._update_ui_no_campaigns()
-                self._finalize_ui()  # Rehabilitar widgets si no hay campañas seleccionadas
+                self.update_progress("❌ Error: No se encontraron campañas")
+                self._finalize_ui()
                 return
             self.resultados_label.config(text=f"Resultados del análisis: {input_str}", font=("TkDefaultFont", 12, "bold"), fg="#23376D")
+
+        # MOSTRAR CUÁNTAS CAMPAÑAS SE VAN A ANALIZAR
+        self.update_progress(f"🎯 Obteniendo clics de {len(seleccionados)} campañas...")
 
         # Deshabilitar widgets para evitar interacciones durante el análisis
         self.entry.config(state=tk.DISABLED)
@@ -68,11 +116,6 @@ class Analyzer:
         self.btn_exportar.config(state=tk.DISABLED, bg="#A9A9A9")
         self.btn_nuevo_rango.config(state=tk.DISABLED, bg="#A9A9A9")
 
-        # Mostrar mensaje inicial de "Buscando información..." con animación
-        self.resultados_tabla.delete(*self.resultados_tabla.get_children())
-        self.resultados_tabla.insert("", "end", values=("", "", "Buscando información", "", ""))
-        self.start_animation()
-        
         self.email_preview.resultados_label = self.resultados_label
         self.root.update()
 
@@ -152,8 +195,20 @@ class Analyzer:
         self.last_results.clear()
         self.all_click_data.clear()
         resultados_por_fecha_pais = defaultdict(lambda: defaultdict(list))
-        for camp in seleccionados:            
+        
+        total_campaigns = len(seleccionados)
+        
+        for i, camp in enumerate(seleccionados, 1):            
             idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+            
+            # Truncar nombre si es muy largo para mostrar en progreso
+            display_name = campaign_name[:25] + "..." if len(campaign_name) > 25 else campaign_name
+            
+            # ACTUALIZAR PROGRESO INCREMENTAL
+            def update_progress_ui():
+                self.update_progress(f"ACTUALIZAR:Procesando {i}/{total_campaigns}: {display_name}")
+            self.root.after(0, update_progress_ui)
+            
             try:
                 send_date = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
             except ValueError as ve:
@@ -189,10 +244,14 @@ class Analyzer:
                 else:
                     resultados_por_fecha_pais[send_date][campaign_name].append(("No se encontraron clics para esta campaña.", None, total_clicks))
 
-        # Actualizar la interfaz desde el hilo principal y finalizar
-        self._update_ui_with_results(resultados_por_fecha_pais)
-        self.root.after(0, self.stop_animation)  # Detener la animación
-        self.root.after(0, self._finalize_ui)  # Asegurarse de que los widgets se rehabiliten
+        # FINALIZAR ANÁLISIS
+        def finalize_analysis():
+            self.update_progress("✅ Análisis completado - Mostrando resultados...")
+            # Esperar un momento y luego mostrar resultados reales
+            self.root.after(1000, self.show_real_results)
+            self._finalize_ui()
+        
+        self.root.after(0, finalize_analysis)
 
     def _update_ui_no_campaigns(self):
         # Actualizar la interfaz cuando no hay campañas seleccionadas
