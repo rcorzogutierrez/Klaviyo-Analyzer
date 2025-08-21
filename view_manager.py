@@ -550,18 +550,18 @@ class ViewManager:
             print(f"Error al visualizar perfiles: {str(e)}")
 
     def create_grand_total_tabla(self, parent_frame, column_widths):
-        """Crea y configura la tabla de total general (grand_total_tabla)."""
-        # CAMBIO 1: Asegurar que show="headings" para no mostrar la columna tree
+        """Crea y configura la tabla de total general."""
         self.grand_total_tabla = ttk.Treeview(parent_frame, columns=(
             "Numero", "Nombre", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "PerRecipient", "OrderCount", "OpenUnique"  
-        ), show="headings", height=1)  # IMPORTANTE: show="headings"
+            "OrderSumValue", "PerRecipient", "OrderCount", "OpenUnique"
+        ), show="headings", height=1)
         
         self.grand_total_tabla.grid(row=3, column=0, sticky="ew", pady=5)
-
-        # CAMBIO 2: Configurar los encabezados (algunos pueden estar ocultos)
-        self.grand_total_tabla.heading("Numero", text="")  # Vacío o oculto
-        self.grand_total_tabla.heading("Nombre", text="")  # Vacío o oculto
+        parent_frame.columnconfigure(0, weight=1)  # Importante para expansión
+        
+        # Configurar encabezados
+        self.grand_total_tabla.heading("Numero", text="")
+        self.grand_total_tabla.heading("Nombre", text="")
         self.grand_total_tabla.heading("OpenRate", text="Open Rate")
         self.grand_total_tabla.heading("ClickRate", text="Click Rate")
         self.grand_total_tabla.heading("Recibios", text="Recibidos")
@@ -569,26 +569,20 @@ class ViewManager:
         self.grand_total_tabla.heading("OrderSumValue", text="Total Value (USD)")
         self.grand_total_tabla.heading("PerRecipient", text="Per Recipient")
         self.grand_total_tabla.heading("OrderCount", text="Order Count")
-        self.grand_total_tabla.heading("OpenUnique", text="Open Únicos")  # IMPORTANTE
-
-        # CAMBIO 3: Configurar anchos - CRÍTICO para OpenUnique
-        # Si column_widths no tiene las claves correctas, usar valores por defecto
-        self.grand_total_tabla.column("Numero", width=0, stretch=False)  # Ocultar
-        self.grand_total_tabla.column("Nombre", width=column_widths.get("Nombre", 120))
-        self.grand_total_tabla.column("OpenRate", width=column_widths.get("OpenRate", 80), anchor="center")
-        self.grand_total_tabla.column("ClickRate", width=column_widths.get("ClickRate", 80), anchor="center")
-        self.grand_total_tabla.column("Recibios", width=column_widths.get("Recibios", 100), anchor="center")
-        self.grand_total_tabla.column("OrderUnique", width=column_widths.get("OrderUnique", 80), anchor="center")
-        self.grand_total_tabla.column("OrderSumValue", width=column_widths.get("OrderSumValue", 120), anchor="e")
-        self.grand_total_tabla.column("PerRecipient", width=column_widths.get("PerRecipient", 120), anchor="e")
-        self.grand_total_tabla.column("OrderCount", width=column_widths.get("OrderCount", 80), anchor="center")
+        self.grand_total_tabla.heading("OpenUnique", text="Open Únicos")
         
-        # CAMBIO 4: CRÍTICO - Asegurar que OpenUnique tenga ancho visible
-        # Usar el ancho de OpensUnicos (con s) si existe, sino usar 100
-        open_unique_width = column_widths.get("OpensUnicos", column_widths.get("OpenUnique", 100))
-        self.grand_total_tabla.column("OpenUnique", width=open_unique_width, anchor="center")
-
-        # Configurar el estilo para la fila
+        # Configurar anchos con valores por defecto seguros
+        self.grand_total_tabla.column("Numero", width=0, stretch=False)
+        self.grand_total_tabla.column("Nombre", width=column_widths.get("Nombre", 150), stretch=True)
+        self.grand_total_tabla.column("OpenRate", width=column_widths.get("OpenRate", 80), stretch=True)
+        self.grand_total_tabla.column("ClickRate", width=column_widths.get("ClickRate", 80), stretch=True)
+        self.grand_total_tabla.column("Recibios", width=column_widths.get("Recibios", 100), stretch=True)
+        self.grand_total_tabla.column("OrderUnique", width=column_widths.get("OrderUnique", 100), stretch=True)
+        self.grand_total_tabla.column("OrderSumValue", width=column_widths.get("OrderSumValue", 120), stretch=True)
+        self.grand_total_tabla.column("PerRecipient", width=column_widths.get("PerRecipient", 100), stretch=True)
+        self.grand_total_tabla.column("OrderCount", width=column_widths.get("OrderCount", 100), stretch=True)
+        self.grand_total_tabla.column("OpenUnique", width=column_widths.get("OpensUnicos", 100), stretch=True)
+        
         self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), 
                                             background="#23376D", foreground="white")
 
