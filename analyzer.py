@@ -198,8 +198,8 @@ class Analyzer:
         
         total_campaigns = len(seleccionados)
         
-        for i, camp in enumerate(seleccionados, 1):            
-            idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+        for i, camp in enumerate(seleccionados, 1):
+            idx, campaign_id, campaign_name, send_time, open_rate, click_rate, delivered, opens_unicos, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
             
             # Truncar nombre si es muy largo para mostrar en progreso
             display_name = campaign_name[:25] + "..." if len(campaign_name) > 25 else campaign_name

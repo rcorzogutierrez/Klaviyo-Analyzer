@@ -1,7 +1,7 @@
 # campaign_logic.py
 import requests
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta  # AGREGADO timedelta
 from config import ALLOWED_CODES, COUNTRY_TO_CURRENCY, CURRENCY_SYMBOLS, HEADERS_KLAVIYO, CURRENCIES, KLAVIYO_URLS
 from klaviyo_api import get_campaign_metrics, get_campaign_details, preload_campaign_details, query_metric_aggregates_post, get_campaign_message_subject
 from exchange_rates import obtener_tasas_de_cambio
@@ -163,7 +163,7 @@ def preload_campaign_details_with_audiences(campaign_ids, cache, audience_cache,
 
 def obtener_campanas(list_start_date, list_end_date, update_callback, view_manager=None, include_audience_sizes=False):
     """
-    Función modificada para aceptar view_manager y opcionalmente incluir tamaños de audiencias.
+    Función modificada para incluir Opens únicos calculados y filtrado inteligente de fechas.
     
     Args:
         list_start_date (str): Fecha de inicio
@@ -172,6 +172,10 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
         view_manager: Manager de vistas para datos de audiencias
         include_audience_sizes (bool): Si True, obtiene los tamaños de audiencias (MÁS LENTO)
     """
+    # DEBUG: Mostrar fechas solicitadas
+    if update_callback:
+        update_callback(f"🔍 DEBUG: Buscando campañas del {list_start_date} al {list_end_date}")
+    
     # Obtener el ID de la métrica de conversión
     conversion_metric_id = None
     try:
@@ -192,12 +196,39 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
 
     if update_callback:
         update_callback("Obteniendo rango de fechas y detalles de métricas...")
+    
+    # Intentar con el rango original primero
     metrics = get_campaign_metrics(list_start_date, list_end_date, conversion_metric_id, update_callback)
+    
+    # Si no hay campañas, extender el rango automáticamente
+    extended_search = False
+    if not metrics:
+        if update_callback:
+            update_callback("⚠️ No se encontraron campañas en el rango original. Extendiendo búsqueda a los últimos 7 días...")
+        
+        # Calcular fecha extendida (7 días antes de la fecha de inicio)
+        try:
+            start_date_obj = datetime.strptime(list_start_date, "%Y-%m-%d")
+            extended_start_date = (start_date_obj - timedelta(days=7)).strftime("%Y-%m-%d")
+            
+            if update_callback:
+                update_callback(f"🔄 Buscando campañas del {extended_start_date} al {list_end_date} (rango extendido)")
+            
+            metrics = get_campaign_metrics(extended_start_date, list_end_date, conversion_metric_id, update_callback)
+            extended_search = True
+            
+        except Exception as e:
+            if update_callback:
+                update_callback(f"Error al extender el rango de fechas: {str(e)}")
 
     if not metrics:
         if update_callback:
-            update_callback("No se encontraron campañas en el rango de fechas seleccionado.")
-        return None, "No se encontraron campañas en el rango de fechas seleccionado."
+            update_callback("No se encontraron campañas incluso con el rango extendido.")
+        return None, "No se encontraron campañas en el rango de fechas seleccionado ni en los 7 días anteriores."
+
+    # Informar si se usó rango extendido
+    if extended_search and update_callback:
+        update_callback(f"✅ Se encontraron {len(metrics)} campañas usando el rango extendido")
 
     if update_callback:
         update_callback("Obteniendo detalles de las campañas...")
@@ -405,7 +436,13 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
         if update_callback:
             update_callback(f"Error al obtener métricas de órdenes completadas: {str(e)}")
 
+    # DEBUG: Contador de campañas procesadas y filtradas
+    total_campaigns_processed = 0
+    campaigns_in_range = 0
+    campaigns_out_of_range = []
+    
     for result in metrics:
+        total_campaigns_processed += 1
         campaign_id = result['groupings']['campaign_id']
         name, send_time, subject, preview, template_id, audiences_info = campaign_details_cache.get(
             campaign_id, 
@@ -415,10 +452,19 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
         open_rate = round(result['statistics']['open_rate'] * 100, 2)
         click_rate = round(result['statistics']['click_rate'] * 100, 2)
         delivered = int(result['statistics']['delivered'])
+        
+        # ===== NUEVO: CALCULAR OPENS ÚNICOS =====
+        opens_unicos = int(delivered * (open_rate / 100))
+        
+        # DEBUG: Mostrar cálculo de opens
+        if update_callback and total_campaigns_processed <= 3:  # Mostrar solo las primeras 3 para no saturar
+            update_callback(f"📊 DEBUG Campaña '{name[:30]}...': Delivered={delivered}, Open Rate={open_rate}% → Opens únicos={opens_unicos}")
 
         try:
             send_dt = datetime.strptime(send_time, "%Y-%m-%d %H:%M:%S") if send_time != 'N/A' else None
             if send_dt and start_dt <= send_dt <= end_dt:
+                campaigns_in_range += 1
+                
                 # Obtener métricas de órdenes completadas para esta campaña
                 order_metrics = order_completed_metrics[campaign_id]
                 
@@ -439,6 +485,12 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                 # Calcular "Per Recipient" (Total Value en USD dividido por Recibidos)
                 per_recipient = usd_value / delivered if delivered > 0 else 0.0
                 
+                # DEBUG: Comparación Orders vs Opens
+                if update_callback and order_metrics["unique"] > 0:
+                    ratio = (order_metrics["unique"] / opens_unicos * 100) if opens_unicos > 0 else 0
+                    if ratio > 5:  # Solo mostrar si la tasa de conversión es significativa
+                        update_callback(f"💰 Conversión: {name[:30]}... → {order_metrics['unique']} orders / {opens_unicos} opens = {ratio:.1f}%")
+                
                 filtered_campaigns.append({
                     'campaign_id': campaign_id,
                     'campaign_name': name,
@@ -446,30 +498,47 @@ def obtener_campanas(list_start_date, list_end_date, update_callback, view_manag
                     'open_rate': open_rate,
                     'click_rate': click_rate,
                     'delivered': delivered,
+                    'opens_unicos': opens_unicos,  # NUEVO CAMPO
                     'subject_line': subject,
                     'preview_text': preview,
                     'template_id': template_id,
-                    'audiences': audiences_info,  # Nueva columna con nombres
+                    'audiences': audiences_info,
                     'order_unique': order_metrics["unique"],
                     'order_sum_value': usd_value,
                     'order_sum_value_local': local_value,
                     'order_count': order_metrics["count"],
                     'per_recipient': per_recipient,
                 })
-                # Eliminar el mensaje detallado de cada campaña individual
+            else:
+                # Campaña fuera del rango
+                if send_dt:
+                    campaigns_out_of_range.append(f"{name[:30]}... ({send_time})")
+                    
         except ValueError as ve:
             if update_callback:
                 update_callback(f"Error en formato de send_time para {name}: {send_time} - Error: {ve}")
             return None, f"Formato de send_time inválido para {name}: {send_time}"
 
+    # DEBUG: Resumen final
+    if update_callback:
+        update_callback(f"📈 DEBUG RESUMEN:")
+        update_callback(f"   - Total campañas procesadas: {total_campaigns_processed}")
+        update_callback(f"   - Campañas en rango de fechas: {campaigns_in_range}")
+        update_callback(f"   - Campañas filtradas (fuera de rango): {len(campaigns_out_of_range)}")
+        if campaigns_out_of_range and len(campaigns_out_of_range) <= 5:
+            for camp in campaigns_out_of_range[:5]:
+                update_callback(f"      ↳ {camp}")
+        if extended_search:
+            update_callback(f"   ⚠️ Se usó rango extendido de fechas para encontrar campañas")
+
     if update_callback:
         update_callback(f"ACTUALIZAR:Procesando campañas filtradas: {len(filtered_campaigns)}")
-    update_callback(f"ACTUALIZAR:✅ Carga completada - Total: {len(filtered_campaigns)} campañas")
+    update_callback(f"ACTUALIZAR:✅ Carga completada - Total: {len(filtered_campaigns)} campañas con Opens únicos calculados")
 
-    # Formatear las campañas para la salida esperada
+    # Formatear las campañas para la salida esperada - INCLUIR opens_unicos
     campaigns_list = [
         (idx, camp['campaign_id'], camp['campaign_name'], camp['send_time'], camp['open_rate'], camp['click_rate'], 
-         camp['delivered'], camp['subject_line'], camp['preview_text'], camp['template_id'],
+         camp['delivered'], camp['opens_unicos'], camp['subject_line'], camp['preview_text'], camp['template_id'],
          camp['audiences'], camp['order_unique'], camp['order_sum_value'], camp['order_sum_value_local'], camp['order_count'], camp['per_recipient'])
         for idx, camp in enumerate(filtered_campaigns, start=1)
     ]
@@ -511,8 +580,9 @@ def agrupar_por_fecha_y_prefijo(campanas):
     return grupos
 
 def add_campaign_row(camp, show_local_value=True, view_manager=None):
-    """Función auxiliar para crear una fila de campaña con indicadores de expansión."""
-    idx, campaign_id, name, send_time, open_rate, click_rate, delivered, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+    """Función auxiliar para crear una fila de campaña con indicadores de expansión y Opens únicos."""
+    # MODIFICADO: Ahora incluye opens_unicos (índice 7)
+    idx, campaign_id, name, send_time, open_rate, click_rate, delivered, opens_unicos, subject, preview, template_id, audiences, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
     
     partes = name.split("_")
     country_code = partes[-1].strip().lower() if len(partes) > 1 and partes[-1].strip().lower() in ALLOWED_CODES else "us"
@@ -532,6 +602,7 @@ def add_campaign_row(camp, show_local_value=True, view_manager=None):
         format_percentage(open_rate),
         format_percentage(click_rate),
         format_number(delivered),
+        format_number(opens_unicos),  # NUEVO: Opens únicos
         format_number(int(order_unique)),
         format_number(order_sum_value, is_currency=True),
     ]
@@ -553,11 +624,11 @@ def add_campaign_row(camp, show_local_value=True, view_manager=None):
 
 
 def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value=True, template_ids_dict=None, view_manager=None):
-    """Función principal modificada para usar el view_manager."""
+    """Función principal modificada para incluir Opens únicos en la tabla y actualizar grand_total_tabla."""
     tree.delete(*tree.get_children())
 
-    # ELIMINAR LA COLUMNA "Audiences" DE LA DEFINICIÓN
-    columns = ("Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
+    # MODIFICADO: Agregar columna "OpensUnicos" después de "Recibios"
+    columns = ("Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OpensUnicos", "OrderUnique",
                "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview")
     tree["columns"] = columns
 
@@ -566,32 +637,33 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         view_manager.audience_data.clear()
         view_manager.expanded_rows.clear()
 
-    # CONFIGURAR ENCABEZADOS SIN COLUMNA AUDIENCES
-    for col, text in zip(columns, ("# / Audiencias", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", "Unique Orders",
-                                   "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Subject Line", "Preview Text")):
+    # CONFIGURAR ENCABEZADOS CON NUEVA COLUMNA
+    for col, text in zip(columns, ("# / Audiencias", "Nombre", "Fecha de Envío", "Open Rate", "Click Rate", "Recibidos", "Opens Únicos",
+                                   "Unique Orders", "Total Value (USD)", "Total Value (Local)", "Per Recipient", "Order Count", "Subject Line", "Preview Text")):
         tree.heading(col, text=text)
 
-    # Configurar anchos de columnas (SIN la columna Audiences)
+    # Configurar anchos de columnas (CON la nueva columna Opens Únicos)
     tree.column("Numero", width=80, anchor="center")  # Aumentado para mostrar "▶ #"
     tree.column("Nombre", width=120)
     tree.column("FechaEnvio", width=100)
     tree.column("OpenRate", width=80, anchor="center")
     tree.column("ClickRate", width=80, anchor="center")
     tree.column("Recibios", width=100, anchor="center")
+    tree.column("OpensUnicos", width=100, anchor="center")  # NUEVA COLUMNA
     tree.column("OrderUnique", width=80, anchor="center")
     tree.column("OrderSumValue", width=120, anchor="e")
     tree.column("OrderSumValueLocal", width=120 if show_local_value else 0, anchor="e", stretch=show_local_value)
     tree.column("PerRecipient", width=120, anchor="e")
     tree.column("OrderCount", width=80, anchor="center")
-    tree.column("Subject", width=200)  # Aumentado al eliminar audiencias
-    tree.column("Preview", width=200)  # Aumentado al eliminar audiencias
+    tree.column("Subject", width=180)
+    tree.column("Preview", width=180)
 
     def process_campaign_for_table(camp, show_local_value=True):
         """Procesa una campaña para mostrarla en la tabla."""
         values, audiences = add_campaign_row(camp, show_local_value, view_manager)
         idx = camp[0]
         campaign_id = camp[1]
-        template_id = camp[9]
+        template_id = camp[10]  # AJUSTADO: template_id está en índice 10 ahora
         
         item_id = tree.insert("", "end", values=values, tags=(f"campaign_{campaign_id}", "campaign_row"))
         
@@ -607,6 +679,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
 
     def calculate_subtotals(camps, show_local_value=True):
         total_delivered = 0
+        total_opens_unicos = 0  # NUEVO
         weighted_open = 0
         weighted_click = 0
         total_weight = 0
@@ -618,8 +691,10 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
         total_delivered_for_weight = 0
 
         for camp in camps:
-            _, _, _, _, open_rate, click_rate, delivered, _, _, _, _, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
+            # AJUSTADO: opens_unicos está en índice 7
+            _, _, _, _, open_rate, click_rate, delivered, opens_unicos, _, _, _, _, order_unique, order_sum_value, order_sum_value_local, order_count, per_recipient = camp
             total_delivered += delivered
+            total_opens_unicos += opens_unicos  # NUEVO
             weighted_open += (open_rate * delivered) / 100
             weighted_click += (click_rate * delivered) / 100
             total_weight += delivered
@@ -641,6 +716,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
                 format_percentage(avg_open_rate),
                 format_percentage(avg_click_rate),
                 format_number(total_delivered),
+                format_number(total_opens_unicos),  # NUEVO
                 format_number(int(total_unique)),
                 format_number(total_sum_value, is_currency=True),
             ]
@@ -656,11 +732,13 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             ])
             return values, {
                 "delivered": total_delivered,
+                "opens_unicos": total_opens_unicos,  # NUEVO - ASEGURAR QUE ESTÉ AQUÍ
                 "weighted_open": weighted_open,
                 "weighted_click": weighted_click,
                 "total_weight": total_weight,
                 "unique": total_unique,
                 "sum_value": total_sum_value,
+                "sum_value_local": total_sum_value_local,  # AGREGADO para consistencia
                 "count": total_count,
                 "per_recipient_weighted": total_per_recipient_weighted,
                 "delivered_for_weight": total_delivered_for_weight
@@ -672,7 +750,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
     if grouping == "País":
         grupos = agrupar_por_pais(campanas)
         for pais in sorted(grupos.keys()):
-            tree.insert("", "end", values=(f"{pais.upper()}", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
+            tree.insert("", "end", values=(f"{pais.upper()}", "", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
             for camp in sorted(grupos[pais], key=lambda x: x[0]):
                 process_campaign_for_table(camp, show_local_value)
 
@@ -680,7 +758,7 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             if subtotal_values:
                 tree.insert("", "end", values=subtotal_values, tags=("bold",))
                 all_subtotals.append(subtotal_data)
-            tree.insert("", "end", values=("",) * 13)  # 13 columnas (sin Audiences)
+            tree.insert("", "end", values=("",) * 14)  # 14 columnas (con Opens Únicos)
     else:
         grupos_fecha = defaultdict(lambda: defaultdict(list))
         for camp in campanas:
@@ -693,18 +771,187 @@ def mostrar_campanas_en_tabla(campanas, tree, grouping="País", show_local_value
             grupos_fecha[fecha][prefijo].append(camp)
 
         for fecha in sorted(grupos_fecha.keys()):
-            tree.insert("", "end", values=(fecha, "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
+            tree.insert("", "end", values=(fecha, "", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
             for prefijo in sorted(grupos_fecha[fecha].keys()):               
-                tree.insert("", "end", values=(prefijo, "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
+                tree.insert("", "end", values=(prefijo, "", "", "", "", "", "", "", "", "", "", "", "", ""), tags=("bold",))
 
                 for camp in sorted(grupos_fecha[fecha][prefijo], key=lambda x: x[0]):
-                    process_campaign_for_table(camp, show_local_value=False)
+                    process_campaign_for_table(camp, show_local_value)  # CAMBIADO: usar show_local_value del parámetro
 
-                subtotal_values, subtotal_data = calculate_subtotals(grupos_fecha[fecha][prefijo], show_local_value=False)
+                subtotal_values, subtotal_data = calculate_subtotals(grupos_fecha[fecha][prefijo], show_local_value)  # CAMBIADO: usar show_local_value del parámetro
                 if subtotal_values:
                     tree.insert("", "end", values=subtotal_values, tags=("bold",))
                     all_subtotals.append(subtotal_data)
-                tree.insert("", "end", values=("",) * 13)  # 13 columnas (sin Audiences)
+                tree.insert("", "end", values=("",) * 14)  # 14 columnas (con Opens Únicos)
+
+    # ========== ACTUALIZACIÓN CRÍTICA DE grand_total_tabla ==========
+    print(f"\n========== DEBUG GRAND TOTAL ==========")
+    print(f"Subtotales disponibles: {len(all_subtotals)}")
+    print(f"view_manager existe: {view_manager is not None}")
+    
+    if view_manager and hasattr(view_manager, 'grand_total_tabla') and view_manager.grand_total_tabla:
+        print(f"grand_total_tabla existe: True")
+        
+        # DEBUG: Inspeccionar la configuración de columnas
+        print(f"Columnas configuradas: {view_manager.grand_total_tabla['columns']}")
+        print(f"Número de columnas: {len(view_manager.grand_total_tabla['columns'])}")
+        
+        # Verificar el ancho de cada columna
+        for col in view_manager.grand_total_tabla['columns']:
+            col_config = view_manager.grand_total_tabla.column(col)
+            print(f"Columna '{col}': width={col_config['width']}, stretch={col_config['stretch']}")
+        
+        if all_subtotals and len(all_subtotals) > 0:
+            # Calcular totales generales
+            grand_total_delivered = sum(s.get("delivered", 0) for s in all_subtotals)
+            grand_total_opens_unicos = sum(s.get("opens_unicos", 0) for s in all_subtotals)
+            grand_total_weighted_open = sum(s.get("weighted_open", 0) for s in all_subtotals)
+            grand_total_weighted_click = sum(s.get("weighted_click", 0) for s in all_subtotals)
+            grand_total_weight = sum(s.get("total_weight", 0) for s in all_subtotals)
+            grand_total_unique = sum(s.get("unique", 0) for s in all_subtotals)
+            grand_total_sum_value = sum(s.get("sum_value", 0) for s in all_subtotals)
+            grand_total_count = sum(s.get("count", 0) for s in all_subtotals)
+            grand_total_per_recipient_weighted = sum(s.get("per_recipient_weighted", 0) for s in all_subtotals)
+            grand_total_delivered_for_weight = sum(s.get("delivered_for_weight", 0) for s in all_subtotals)
+            
+            print(f"Opens únicos total calculado: {grand_total_opens_unicos}")
+            print(f"Delivered total: {grand_total_delivered}")
+            print(f"Opens por subtotal: {[s.get('opens_unicos', 0) for s in all_subtotals]}")
+            
+            if grand_total_weight > 0:
+                grand_avg_open_rate = round((grand_total_weighted_open / grand_total_weight) * 100, 2)
+                grand_avg_click_rate = round((grand_total_weighted_click / grand_total_weight) * 100, 2)
+                grand_per_recipient_avg = grand_total_per_recipient_weighted / grand_total_delivered_for_weight if grand_total_delivered_for_weight > 0 else 0.0
+                
+                # Limpiar la tabla grand_total_tabla
+                view_manager.grand_total_tabla.delete(*view_manager.grand_total_tabla.get_children())
+                
+                # Formatear el valor de opens únicos
+                opens_formatted = format_number(grand_total_opens_unicos)
+                print(f"Opens únicos formateado: {opens_formatted}")
+                
+                # INSERTAR valores en el orden exacto que espera grand_total_tabla
+                valores_grand_total = (
+                    "",  # Numero
+                    "Total General",  # Nombre
+                    format_percentage(grand_avg_open_rate),  # OpenRate
+                    format_percentage(grand_avg_click_rate),  # ClickRate
+                    format_number(grand_total_delivered),  # Recibidos
+                    format_number(int(grand_total_unique)),  # OrderUnique
+                    format_number(grand_total_sum_value, is_currency=True),  # OrderSumValue
+                    format_number(grand_per_recipient_avg, is_currency=True),  # PerRecipient
+                    format_number(int(grand_total_count)),  # OrderCount
+                    opens_formatted  # OpenUnique - POSICIÓN 9
+                )
+                
+                print(f"Valores a insertar: {valores_grand_total}")
+                print(f"Valor en posición 9 (OpenUnique): {valores_grand_total[9]}")
+                
+                # Insertar en la tabla
+                inserted_item = view_manager.grand_total_tabla.insert("", "end", values=valores_grand_total, tags=("grand_total",))
+                
+                # RECONFIGURAR las columnas para ajuste dinámico pero manteniendo OpenUnique visible
+                try:
+                    # Obtener el ancho total disponible (aproximado)
+                    # Configurar las columnas con stretch para que se ajusten dinámicamente
+                    view_manager.grand_total_tabla.column("Numero", width=0, stretch=False)  # Ocultar
+                    view_manager.grand_total_tabla.column("Nombre", width=150, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("OpenRate", width=80, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("ClickRate", width=80, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("Recibios", width=100, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("OrderUnique", width=100, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("OrderSumValue", width=120, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("PerRecipient", width=100, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("OrderCount", width=100, stretch=True)  # Expandible
+                    view_manager.grand_total_tabla.column("OpenUnique", width=100, minwidth=80, stretch=True)  # CRÍTICO: expandible pero con ancho mínimo
+                    
+                    # Asegurar que los encabezados sean correctos
+                    view_manager.grand_total_tabla.heading("OpenUnique", text="Open Únicos")
+                    
+                    print(f"Columnas reconfiguradas con stretch=True para ajuste dinámico")
+                        
+                except Exception as e:
+                    print(f"Error reconfigurando columnas: {e}")
+                
+                # Forzar actualización completa
+                view_manager.grand_total_tabla.update_idletasks()
+                view_manager.grand_total_tabla.update()
+                
+                # Verificar inserción
+                if inserted_item:
+                    valores_insertados = view_manager.grand_total_tabla.item(inserted_item, 'values')
+                    print(f"Valores realmente insertados: {valores_insertados}")
+                    
+                    # Intentar diferentes métodos para establecer el valor
+                    try:
+                        # Método 1: set directo con nombre de columna
+                        view_manager.grand_total_tabla.set(inserted_item, "OpenUnique", opens_formatted)
+                        print(f"Método 1: Valor forzado en columna OpenUnique: {opens_formatted}")
+                    except Exception as e:
+                        print(f"Método 1 falló: {e}")
+                    
+                    try:
+                        # Método 2: set con índice de columna
+                        view_manager.grand_total_tabla.set(inserted_item, "#10", opens_formatted)
+                        print(f"Método 2: Valor forzado en columna #10: {opens_formatted}")
+                    except Exception as e:
+                        print(f"Método 2 falló: {e}")
+                    
+                    # NUEVO: Programar actualización retrasada para sobrescribir cualquier cambio posterior
+                    def update_opens_delayed():
+                        try:
+                            # Obtener el item actual (por si fue recreado)
+                            items = view_manager.grand_total_tabla.get_children()
+                            if items:
+                                item = items[0]  # Debería ser el único item
+                                # Obtener valores actuales
+                                current_values = list(view_manager.grand_total_tabla.item(item, 'values'))
+                                print(f"DEBUG DELAYED: Valores actuales antes de actualizar: {current_values}")
+                                
+                                # Actualizar solo la columna 9 (OpenUnique)
+                                current_values[9] = opens_formatted
+                                
+                                # Establecer todos los valores de nuevo
+                                view_manager.grand_total_tabla.item(item, values=current_values)
+                                
+                                # También intentar con set
+                                view_manager.grand_total_tabla.set(item, "OpenUnique", opens_formatted)
+                                
+                                print(f"DEBUG DELAYED: Opens únicos actualizado a {opens_formatted}")
+                                
+                                # Verificar que se actualizó
+                                final_values = view_manager.grand_total_tabla.item(item, 'values')
+                                print(f"DEBUG DELAYED: Valores finales: {final_values}")
+                                
+                        except Exception as e:
+                            print(f"DEBUG DELAYED: Error actualizando: {e}")
+                    
+                    # Programar la actualización para 100ms después
+                    if hasattr(view_manager.grand_total_tabla, 'after'):
+                        view_manager.grand_total_tabla.after(100, update_opens_delayed)
+                        print("Actualización retrasada programada para 100ms")
+                    
+                    # Verificar valor final en cada columna
+                    print("\nValores finales por columna:")
+                    for i, col in enumerate(view_manager.grand_total_tabla['columns']):
+                        try:
+                            val = view_manager.grand_total_tabla.set(inserted_item, col)
+                            print(f"  Columna {i} ('{col}'): '{val}'")
+                        except:
+                            print(f"  Columna {i} ('{col}'): ERROR al leer")
+                    
+                    # Forzar actualización visual
+                    view_manager.grand_total_tabla.update_idletasks()
+                    view_manager.grand_total_tabla.update()
+                    
+            else:
+                print(f"No se actualiza porque grand_total_weight = {grand_total_weight}")
+        else:
+            print(f"No hay subtotales para procesar")
+    else:
+        print(f"grand_total_tabla no existe o view_manager no está disponible")
+    
+    print(f"========================================\n")
 
     return all_subtotals
 

@@ -285,6 +285,7 @@ class ResultadosApp:
             grand_total_count = 0
             grand_total_per_recipient_weighted = 0
             grand_total_delivered_for_weight = 0
+            grand_total_open_unique = 0  # NUEVA: Grand total de opens únicos
 
             for subtotal in all_subtotals:
                 if subtotal:
@@ -297,6 +298,7 @@ class ResultadosApp:
                     grand_total_count += subtotal["count"]
                     grand_total_per_recipient_weighted += subtotal["per_recipient_weighted"]
                     grand_total_delivered_for_weight += subtotal["delivered_for_weight"]
+                    grand_total_open_unique += subtotal.get("open_unique", 0)  # NUEVA: Sumar opens únicos
 
             if grand_total_weight > 0:
                 grand_avg_open_rate = round((grand_weighted_open / grand_total_weight) * 100, 2)
@@ -312,6 +314,7 @@ class ResultadosApp:
                     format_number(grand_total_sum_value, is_currency=True),
                     format_number(grand_per_recipient_weighted_avg, is_currency=True),
                     format_number(int(grand_total_count)),
+                    format_number(int(grand_total_open_unique)),  # NUEVA: Open Únicos en grand total
                 ]
                 self.grand_total_tabla.insert("", "end", values=values, tags=("grand_total",))
 

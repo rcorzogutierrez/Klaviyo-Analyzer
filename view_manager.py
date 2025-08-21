@@ -22,10 +22,10 @@ class ViewManager:
         self.audience_names_cache = {}  # AGREGAR CACHE DE NOMBRES
 
     def create_campanas_tabla(self, treeview_frame, total_table_width):
-        # Crear la tabla SIN la columna "Audiences"
+        # Crear la tabla CON la nueva columna "OpenUnique"
         self.campanas_tabla = ttk.Treeview(treeview_frame, columns=(
             "Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "Subject", "Preview"
+            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "OpenUnique", "Subject", "Preview"
         ), show="headings")
         self.campanas_tabla.grid(row=0, column=0, sticky="nsew")
 
@@ -51,24 +51,26 @@ class ViewManager:
         self.campanas_tabla.heading("OrderSumValueLocal", text="Total Value (Local)")
         self.campanas_tabla.heading("PerRecipient", text="Per Recipient")
         self.campanas_tabla.heading("OrderCount", text="Order Count")
+        self.campanas_tabla.heading("OpenUnique", text="Open Únicos")  # NUEVA COLUMNA
         self.campanas_tabla.heading("Subject", text="Subject Line")
         self.campanas_tabla.heading("Preview", text="Preview Text")
 
-        # Configurar anchos de columnas (ELIMINAR LA COLUMNA AUDIENCES)
+        # Configurar anchos de columnas (CON la nueva columna OpenUnique)
         column_widths = {
-            "Numero": int(total_table_width * 0.06),       # Aumentado para mostrar indicador
-            "Nombre": int(total_table_width * 0.09),       
+            "Numero": int(total_table_width * 0.05),       # Reducido para dar espacio
+            "Nombre": int(total_table_width * 0.08),       # Reducido para dar espacio
             "FechaEnvio": int(total_table_width * 0.06),   
             "OpenRate": int(total_table_width * 0.05),     
             "ClickRate": int(total_table_width * 0.05),    
             "Recibios": int(total_table_width * 0.06),     
             "OrderUnique": int(total_table_width * 0.05),  
-            "OrderSumValue": int(total_table_width * 0.08), 
-            "OrderSumValueLocal": int(total_table_width * 0.08), 
-            "PerRecipient": int(total_table_width * 0.08), 
+            "OrderSumValue": int(total_table_width * 0.07), # Reducido para dar espacio
+            "OrderSumValueLocal": int(total_table_width * 0.07), # Reducido para dar espacio
+            "PerRecipient": int(total_table_width * 0.07), # Reducido para dar espacio
             "OrderCount": int(total_table_width * 0.05),   
-            "Subject": int(total_table_width * 0.14),      # Aumentado al quitar audiencias
-            "Preview": int(total_table_width * 0.15),      # Aumentado al quitar audiencias
+            "OpenUnique": int(total_table_width * 0.05),   # NUEVA COLUMNA
+            "Subject": int(total_table_width * 0.13),      # Reducido para dar espacio a OpenUnique
+            "Preview": int(total_table_width * 0.13),      # Reducido para dar espacio a OpenUnique
         }
 
         self.column_widths = column_widths
@@ -85,6 +87,109 @@ class ViewManager:
         self.campanas_tabla.column("OrderSumValueLocal", width=column_widths["OrderSumValueLocal"], anchor="e")
         self.campanas_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
         self.campanas_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
+        self.campanas_tabla.column("OpenUnique", width=column_widths["OpenUnique"], anchor="center")  # NUEVA COLUMNA
+        self.campanas_tabla.column("Subject", width=column_widths["Subject"])
+        self.campanas_tabla.column("Preview", width=column_widths["Preview"])
+
+        # Configurar estilos para las filas de audiencias
+        self.campanas_tabla.tag_configure("bold", font=("Arial", 11, "bold"), foreground="#23376D")
+        self.campanas_tabla.tag_configure("campaign_row", font=("Arial", 10))
+        self.campanas_tabla.tag_configure("audience_detail", font=("Arial", 9), background="#F5F5F5")
+        self.campanas_tabla.tag_configure("audience_header", font=("Arial", 9, "bold"), background="#E6F3FF")
+
+        # NUEVOS BINDINGS PARA MANEJAR CLICS
+        self.campanas_tabla.bind("<Button-1>", self.on_single_click)  # Clic simple
+        self.campanas_tabla.bind("<Double-1>", self.on_double_click)  # Doble clic
+        self.campanas_tabla.bind("<Button-3>", self.show_context_menu)  # Clic derechoimport tkinter as tk
+from tkinter import ttk
+import tkinter.messagebox
+
+class ViewManager:
+    def __init__(self, main_frame, screen_width, screen_height, email_preview, exporter):
+        self.main_frame = main_frame
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.email_preview = email_preview
+        self.exporter = exporter
+        self.campanas_tabla = None
+        self.grand_total_tabla = None
+        self.column_widths = None
+        self.left_frame = None
+        self.filter_var = tk.StringVar(value="Todos")
+        self.resultados_tabla = None
+        
+        # NUEVAS VARIABLES PARA EL SISTEMA DROPDOWN
+        self.expanded_rows = {}  # Almacena el estado de expansión de cada fila
+        self.audience_data = {}  # Almacena los datos completos de audiencias
+        self.audience_names_cache = {}  # AGREGAR CACHE DE NOMBRES
+
+    def create_campanas_tabla(self, treeview_frame, total_table_width):
+        # Crear la tabla CON la nueva columna "OpenUnique"
+        self.campanas_tabla = ttk.Treeview(treeview_frame, columns=(
+            "Numero", "Nombre", "FechaEnvio", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
+            "OrderSumValue", "OrderSumValueLocal", "PerRecipient", "OrderCount", "OpenUnique", "Subject", "Preview"
+        ), show="headings")
+        self.campanas_tabla.grid(row=0, column=0, sticky="nsew")
+
+        # Configurar scrollbar vertical
+        scrollbar = ttk.Scrollbar(treeview_frame, orient="vertical", command=self.campanas_tabla.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.campanas_tabla.configure(yscrollcommand=scrollbar.set)
+
+        # Configurar estilos
+        style = ttk.Style()
+        style.configure("Treeview", font=("Arial", 10), rowheight=30)
+        style.configure("Treeview.Heading", font=("Arial", 11, "bold"))
+
+        # CAMBIAR EL TÍTULO DE LA PRIMERA COLUMNA PARA INDICAR FUNCIONALIDAD
+        self.campanas_tabla.heading("Numero", text="# / Audiencias")
+        self.campanas_tabla.heading("Nombre", text="Nombre")
+        self.campanas_tabla.heading("FechaEnvio", text="Fecha de Envío")
+        self.campanas_tabla.heading("OpenRate", text="Open Rate")
+        self.campanas_tabla.heading("ClickRate", text="Click Rate")
+        self.campanas_tabla.heading("Recibios", text="Recibidos")
+        self.campanas_tabla.heading("OrderUnique", text="Unique Orders")
+        self.campanas_tabla.heading("OrderSumValue", text="Total Value (USD)")
+        self.campanas_tabla.heading("OrderSumValueLocal", text="Total Value (Local)")
+        self.campanas_tabla.heading("PerRecipient", text="Per Recipient")
+        self.campanas_tabla.heading("OrderCount", text="Order Count")
+        self.campanas_tabla.heading("OpenUnique", text="Open Únicos")  # NUEVA COLUMNA
+        self.campanas_tabla.heading("Subject", text="Subject Line")
+        self.campanas_tabla.heading("Preview", text="Preview Text")
+
+        # Configurar anchos de columnas (CON la nueva columna OpenUnique)
+        column_widths = {
+            "Numero": int(total_table_width * 0.05),       # Reducido para dar espacio
+            "Nombre": int(total_table_width * 0.08),       # Reducido para dar espacio
+            "FechaEnvio": int(total_table_width * 0.06),   
+            "OpenRate": int(total_table_width * 0.05),     
+            "ClickRate": int(total_table_width * 0.05),    
+            "Recibios": int(total_table_width * 0.06),     
+            "OrderUnique": int(total_table_width * 0.05),  
+            "OrderSumValue": int(total_table_width * 0.07), # Reducido para dar espacio
+            "OrderSumValueLocal": int(total_table_width * 0.07), # Reducido para dar espacio
+            "PerRecipient": int(total_table_width * 0.07), # Reducido para dar espacio
+            "OrderCount": int(total_table_width * 0.05),   
+            "OpenUnique": int(total_table_width * 0.05),   # NUEVA COLUMNA
+            "Subject": int(total_table_width * 0.13),      # Reducido para dar espacio a OpenUnique
+            "Preview": int(total_table_width * 0.13),      # Reducido para dar espacio a OpenUnique
+        }
+
+        self.column_widths = column_widths
+
+        # Aplicar configuraciones de columnas
+        self.campanas_tabla.column("Numero", width=column_widths["Numero"], anchor="center")
+        self.campanas_tabla.column("Nombre", width=column_widths["Nombre"])
+        self.campanas_tabla.column("FechaEnvio", width=column_widths["FechaEnvio"])
+        self.campanas_tabla.column("OpenRate", width=column_widths["OpenRate"], anchor="center")
+        self.campanas_tabla.column("ClickRate", width=column_widths["ClickRate"], anchor="center")
+        self.campanas_tabla.column("Recibios", width=column_widths["Recibios"], anchor="center")
+        self.campanas_tabla.column("OrderUnique", width=column_widths["OrderUnique"], anchor="center")
+        self.campanas_tabla.column("OrderSumValue", width=column_widths["OrderSumValue"], anchor="e")
+        self.campanas_tabla.column("OrderSumValueLocal", width=column_widths["OrderSumValueLocal"], anchor="e")
+        self.campanas_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
+        self.campanas_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
+        self.campanas_tabla.column("OpenUnique", width=column_widths["OpenUnique"], anchor="center")  # NUEVA COLUMNA
         self.campanas_tabla.column("Subject", width=column_widths["Subject"])
         self.campanas_tabla.column("Preview", width=column_widths["Preview"])
 
@@ -109,9 +214,8 @@ class ViewManager:
         if not item:
             return
             
-        # Debug: Imprimir información del clic
         values = self.campanas_tabla.item(item, "values")
-        tags = self.campanas_tabla.item(item, "tags")      
+        tags = self.campanas_tabla.item(item, "tags")
         
         if column == "#1":  # Solo en la primera columna (Numero)
             # Verificar si es una fila de campaña (no de grupo o subtotal)
@@ -120,8 +224,8 @@ class ViewManager:
                 
         # NUEVO: Verificar si es una fila de audiencia con icono de carga EN CUALQUIER COLUMNA
         if "audience_detail" in tags:
-            audience_text = values[1] if len(values) > 1 else ""            
-            if "🔃" in audience_text:                
+            audience_text = values[1] if len(values) > 1 else ""
+            if "🔃" in audience_text:
                 self.load_audience_size(item, audience_text)
 
     def on_double_click(self, event):
@@ -206,11 +310,10 @@ class ViewManager:
         import requests
         from config import KLAVIYO_URLS, HEADERS_KLAVIYO
         
-                
-        # Extraer el nombre de la audiencia (quitar símbolos y botón) - CAMBIO AQUÍ
-        audience_name = audience_text.replace("  • ", "").replace("  🔃", "").strip()       
+        # Extraer el nombre de la audiencia (quitar símbolos y botón)
+        audience_name = audience_text.replace("  • ", "").replace("  🔃", "").strip()
         
-        # Mostrar indicador de carga - CAMBIO AQUÍ
+        # Mostrar indicador de carga
         loading_text = audience_text.replace("🔃", "⏳")
         self.campanas_tabla.item(item_id, values=("", loading_text, "", "", "", "", "", "", "", "", "", "", ""))
         
@@ -221,47 +324,39 @@ class ViewManager:
                 audience_id = None
                 for aid, name in self.audience_names_cache.items():
                     if name == audience_name:
-                        audience_id = aid                        
+                        audience_id = aid
                         break
                 
                 if not audience_id:
-                    print(f"No se encontró ID para '{audience_name}'")
-                    print(f"Audiencias disponibles en cache: {list(self.audience_names_cache.values())}")
-                    # No se encontró el ID, mostrar sin tamaño - CAMBIO AQUÍ
+                    # No se encontró el ID, mostrar sin tamaño
                     final_text = audience_text.replace("  🔃", " (ID no encontrado)")
                     self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
                         item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", "")
                     ))
-                    return              
-                
+                    return
                 
                 # Intentar obtener como lista primero
                 profile_count = None
                 url = f"{KLAVIYO_URLS['LISTS']}{audience_id}/?additional-fields[list]=profile_count"
-                
                 response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    profile_count = data['data']['attributes'].get('profile_count', 0)                 
-                else:                    
+                    profile_count = data['data']['attributes'].get('profile_count', 0)
+                else:
                     # Intentar como segmento
-                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/?additional-fields[segment]=profile_count"                    
+                    url = f"{KLAVIYO_URLS['SEGMENTS']}{audience_id}/?additional-fields[segment]=profile_count"
                     response = requests.get(url, headers=HEADERS_KLAVIYO, timeout=10)
                     if response.status_code == 200:
                         data = response.json()
-                        profile_count = data['data']['attributes'].get('profile_count', 0)                        
-                    else:
-                        print(f"También falló como segmento (status: {response.status_code})")
+                        profile_count = data['data']['attributes'].get('profile_count', 0)
                 
                 # Actualizar la interfaz en el hilo principal
                 if profile_count is not None:
-                    # CAMBIO AQUÍ - quitar el icono de carga y añadir el conteo
+                    # Quitar el icono de carga y añadir el conteo
                     final_text = audience_text.replace("  🔃", f" ({profile_count:,})")
-                   
                 else:
                     final_text = audience_text.replace("  🔃", " (No disponible)")
-                    print("No se pudo obtener el conteo")
                 
                 # Programar la actualización en el hilo principal
                 self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
@@ -269,8 +364,7 @@ class ViewManager:
                 ))
                 
             except Exception as e:
-                print(f"Error en fetch_size: {str(e)}")
-                # En caso de error, quitar el botón - CAMBIO AQUÍ
+                # En caso de error, quitar el botón
                 final_text = audience_text.replace("  🔃", f" (Error: {str(e)})")
                 self.campanas_tabla.after(0, lambda: self.campanas_tabla.item(
                     item_id, values=("", final_text, "", "", "", "", "", "", "", "", "", "", "")
@@ -457,14 +551,17 @@ class ViewManager:
 
     def create_grand_total_tabla(self, parent_frame, column_widths):
         """Crea y configura la tabla de total general (grand_total_tabla)."""
+        # CAMBIO 1: Asegurar que show="headings" para no mostrar la columna tree
         self.grand_total_tabla = ttk.Treeview(parent_frame, columns=(
             "Numero", "Nombre", "OpenRate", "ClickRate", "Recibios", "OrderUnique",
-            "OrderSumValue", "PerRecipient", "OrderCount"  # ELIMINAR Audiences
-        ), show="headings", height=1)
+            "OrderSumValue", "PerRecipient", "OrderCount", "OpenUnique"  
+        ), show="headings", height=1)  # IMPORTANTE: show="headings"
+        
         self.grand_total_tabla.grid(row=3, column=0, sticky="ew", pady=5)
 
-        self.grand_total_tabla.heading("Numero", text="#")
-        self.grand_total_tabla.heading("Nombre", text="Nombre")
+        # CAMBIO 2: Configurar los encabezados (algunos pueden estar ocultos)
+        self.grand_total_tabla.heading("Numero", text="")  # Vacío o oculto
+        self.grand_total_tabla.heading("Nombre", text="")  # Vacío o oculto
         self.grand_total_tabla.heading("OpenRate", text="Open Rate")
         self.grand_total_tabla.heading("ClickRate", text="Click Rate")
         self.grand_total_tabla.heading("Recibios", text="Recibidos")
@@ -472,18 +569,28 @@ class ViewManager:
         self.grand_total_tabla.heading("OrderSumValue", text="Total Value (USD)")
         self.grand_total_tabla.heading("PerRecipient", text="Per Recipient")
         self.grand_total_tabla.heading("OrderCount", text="Order Count")
+        self.grand_total_tabla.heading("OpenUnique", text="Open Únicos")  # IMPORTANTE
 
-        self.grand_total_tabla.column("Numero", width=column_widths["Numero"], anchor="center")
-        self.grand_total_tabla.column("Nombre", width=column_widths["Nombre"])
-        self.grand_total_tabla.column("OpenRate", width=column_widths["OpenRate"], anchor="center")
-        self.grand_total_tabla.column("ClickRate", width=column_widths["ClickRate"], anchor="center")
-        self.grand_total_tabla.column("Recibios", width=column_widths["Recibios"], anchor="center")
-        self.grand_total_tabla.column("OrderUnique", width=column_widths["OrderUnique"], anchor="center")
-        self.grand_total_tabla.column("OrderSumValue", width=column_widths["OrderSumValue"], anchor="e")
-        self.grand_total_tabla.column("PerRecipient", width=column_widths["PerRecipient"], anchor="e")
-        self.grand_total_tabla.column("OrderCount", width=column_widths["OrderCount"], anchor="center")
+        # CAMBIO 3: Configurar anchos - CRÍTICO para OpenUnique
+        # Si column_widths no tiene las claves correctas, usar valores por defecto
+        self.grand_total_tabla.column("Numero", width=0, stretch=False)  # Ocultar
+        self.grand_total_tabla.column("Nombre", width=column_widths.get("Nombre", 120))
+        self.grand_total_tabla.column("OpenRate", width=column_widths.get("OpenRate", 80), anchor="center")
+        self.grand_total_tabla.column("ClickRate", width=column_widths.get("ClickRate", 80), anchor="center")
+        self.grand_total_tabla.column("Recibios", width=column_widths.get("Recibios", 100), anchor="center")
+        self.grand_total_tabla.column("OrderUnique", width=column_widths.get("OrderUnique", 80), anchor="center")
+        self.grand_total_tabla.column("OrderSumValue", width=column_widths.get("OrderSumValue", 120), anchor="e")
+        self.grand_total_tabla.column("PerRecipient", width=column_widths.get("PerRecipient", 120), anchor="e")
+        self.grand_total_tabla.column("OrderCount", width=column_widths.get("OrderCount", 80), anchor="center")
+        
+        # CAMBIO 4: CRÍTICO - Asegurar que OpenUnique tenga ancho visible
+        # Usar el ancho de OpensUnicos (con s) si existe, sino usar 100
+        open_unique_width = column_widths.get("OpensUnicos", column_widths.get("OpenUnique", 100))
+        self.grand_total_tabla.column("OpenUnique", width=open_unique_width, anchor="center")
 
-        self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), background="#23376D", foreground="white")
+        # Configurar el estilo para la fila
+        self.grand_total_tabla.tag_configure("grand_total", font=("Arial", 11, "bold"), 
+                                            background="#23376D", foreground="white")
 
     def setup_metrics_view(self, entry_frame, buttons_frame, grouping_var, show_local_value, update_grouping_callback, start_date, end_date):
         """Configura la vista inicial con solo la tabla de métricas."""
